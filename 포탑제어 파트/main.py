@@ -139,7 +139,7 @@ def get_action():
         "moveWS": moveWS,
         "moveAD": moveAD,
         "turretQE": {"command": turret_qe, "weight": 0.5},
-        "turretRF": {"command": turret_rf, "weight": 0.5},
+        "turretRF": {"command": turret_rf, "weight": 0.1},
         "fire": fire
     }
     if fire:
