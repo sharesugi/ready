@@ -6,6 +6,8 @@ import requests
 import time
 import math
 
+### 오병직 test ### 내용 추가
+
 app = Flask(__name__)
 model = YOLO('./map2+map5(kh+oj).pt')
 
