@@ -6,10 +6,8 @@ import requests
 import time
 import math
 
-### 오병직 test ### 내용 추가
-
 app = Flask(__name__)
-model = YOLO('./map2+map5(kh+oj).pt')
+model = YOLO('/root/jupyter_home/YOLOv8_Object_Detection/datasets/runs/detect/yolv8m_tankv2_augmentated2/weights/best.pt')
 
 # === 카메라 및 화면 정보 (예시값, 환경에 맞게 수정 가능) ===
 CAMERA_H_FOV = 90  # 수평 시야각
@@ -141,7 +139,7 @@ def get_action():
         "moveWS": moveWS,
         "moveAD": moveAD,
         "turretQE": {"command": turret_qe, "weight": 0.5},
-        "turretRF": {"command": turret_rf, "weight": 0.5},
+        "turretRF": {"command": turret_rf, "weight": 0.1},
         "fire": fire
     }
     if fire:
