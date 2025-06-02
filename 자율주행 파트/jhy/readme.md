@@ -7,6 +7,7 @@
 위 코드에서 아래 기능 추가
 - 각도가 크게 꺾일 때 멈췄다 가기
 - diff가 30이상이면 멈췄다감.
+- 근데 장애물이 있을 때는 잘 못감  
 
 ![after](https://github.com/user-attachments/assets/dc47757b-bc28-49c1-87c5-471653aa096a)
 
