@@ -1,4 +1,6 @@
-# 장애물 근접시 속도 줄이기 추가
+# | 현각도 - 목표 각도| 값이 30 이상이면 멈췄다가감 추가_ 희연연
+# path 2개 이동후 재계산 추가_ 희연
+# 장애물 근접시 속도 줄이기 추가_김기홍님
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
 from queue import PriorityQueue
@@ -238,7 +240,6 @@ def get_action():
             w_degree = 0.3
         elif 30 <= abs_diff < 60 :    
             w_degree = 0.6
-            stop = True
         elif 60 <= abs_diff < 90 : 
             w_degree = 0.75
         else :
@@ -248,11 +249,20 @@ def get_action():
         turn = {'command': 'A' if diff > 0 else 'D', 'weight': w_degree}
 
         cmd = {
-            'moveWS': forward,
-            'moveAD': turn
+            'moveAD': turn,
+            'moveWS': forward  # 여기 바꿈꿈
         }
 
         combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
+
+        if stop:
+            print("멈추고 갈게요!")
+            cmd_stop = {
+                'moveWS': {'command': "STOP", 'weight': 1.0},
+                'moveAD': {'command': "", 'weight': 0.0}
+            }
+
+            combined_command_cache.append(cmd_stop)
 
     # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
     if len(position_history) == 0:
@@ -271,8 +281,8 @@ def get_action():
 
     # print문 살짝 수정-희연
     print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
-    print(f"🚀 cmd 2개 {combined_command_cache}")
-    return jsonify(cmd)
+    print(f"🚀 cmd 2개 이상 {combined_command_cache}")
+    return jsonify(combined_command_cache.pop(0))
 
 
 
@@ -373,4 +383,3 @@ def info():
 # 서버 실행
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
