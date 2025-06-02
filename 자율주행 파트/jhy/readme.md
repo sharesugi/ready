@@ -14,4 +14,5 @@
 [김기홍님 코드]    
 0602 아침에 올라온 코드로 돌려봤을때  
 - 한번 이동 후 path 재계산  
-![download](https://github.com/user-attachments/assets/fda43535-05eb-4610-9e68-8e57ea1ce420)
+![download](https://github.com/user-attachments/assets/73195860-40e0-4275-8ca1-af134ebd6b88)
+
