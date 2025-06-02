@@ -1,8 +1,10 @@
 [희연 코드]  
 - 2번 이동후 path 재계산했을때.
 - 0602 아침에 기홍님 코드를 base로 내 코드와 합친 것.
+- 장애물 잘피함
 
 ![download](https://github.com/user-attachments/assets/fb23b9f5-0f6c-4c81-96b9-08974f115c67)
+![download](https://github.com/user-attachments/assets/01018496-14ee-4dcd-b5db-2cfa3ae8ca26)
 
 위 코드에서 아래 기능 추가
 - 각도가 크게 꺾일 때 멈췄다 가기
