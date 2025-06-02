@@ -300,16 +300,14 @@ def update_bullet():
     print(data)
     hit_type = data.get("hit")
     bullet_x = data.get("x", 0)
+    bullet_y = data.get("y", 0)
     bullet_z = data.get("z", 0)
 
     turret_info.extend([data.get("x", 0), data.get("y", 0), data.get("z", 0)])
     print(turret_info)
-    if len(turret_info) == 8:
-        bullet_data.append(turret_info[:])
-    df = pd.DataFrame(bullet_data, columns=["x_pos", "y_pos", "z_pos", "x_angle", "y_angle", "x_target", "y_target", "z_target"])
-    df.to_csv("turret_info.csv", index=False)
+    
 
-    print(f"💥 bullet update: hit={hit_type}, x={bullet_x}, z={bullet_z}")
+    print(f"💥 bullet update: hit={hit_type}, x={bullet_x}, y={bullet_y}, z={bullet_z}")
 
     if hit_type == "enemy":
         removed = False
