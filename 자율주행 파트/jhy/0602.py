@@ -1,5 +1,5 @@
-# | 현각도 - 목표 각도| 값이 30 이상이면 멈췄다가감 추가_ 희연연
-# path 2개 이동후 재계산 추가_ 희연
+# 0604_기홍님 휴리스틱 함수 추가 
+# path 2개 이동후 재계산 추가_ 희연(틀어야할 각도가 클때 멈추는건 뺌. 같이 있으면 성능 안 좋아짐)
 # 장애물 근접시 속도 줄이기 추가_김기홍님
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
@@ -8,6 +8,7 @@ import os
 import torch
 from ultralytics import YOLO
 import math
+import heapq
 import cv2
 import numpy as np
 import csv
@@ -57,8 +58,12 @@ class Node:
     def __lt__(self, other):
         return self.f < other.f
 
-def heuristic(a, b):
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+def heuristic(a, b): # Diagonal (Octile) 방식으로 heuristic 변경
+    dx = abs(a[0] - b[0])
+    dy = abs(a[1] - b[1])
+    D = 1
+    D2 = math.sqrt(2)
+    return D * (dx + dy) + (D2 - 2 * D) * min(dx, dy)
 
 def get_neighbors(pos):
     neighbors = []
@@ -89,7 +94,14 @@ def a_star(start, goal):
         for nbr in get_neighbors(current.position):
             if nbr in closed: continue
             node = Node(nbr, current)
-            node.g = current.g + 1
+
+            # 이 부분 추가함.
+            dx = abs(nbr[0] - current.position[0])
+            dz = abs(nbr[1] - current.position[1])
+            step_cost = math.sqrt(2) if dx != 0 and dz != 0 else 1
+
+            
+            node.g = current.g + step_cost
             node.h = heuristic(nbr, goal)
             node.f = node.g + node.h
             open_set.put((node.f, node))
@@ -197,7 +209,7 @@ def get_action():
     elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
         next_grid = [path[1]]      # 한개씩 참조  
     else: 
-        next_grid = current_grid   # 0개면 멈춰라! 도착한거니까!
+        next_grid = [current_grid]   # 0개면 멈춰라! 도착한거니까!
 
     for i in range(len(next_grid)):  # 두개의 좌표가 맵을 빠져나기지 않는지 확인 # 0, 1
 
@@ -240,6 +252,7 @@ def get_action():
             w_degree = 0.3
         elif 30 <= abs_diff < 60 :    
             w_degree = 0.6
+            stop = True
         elif 60 <= abs_diff < 90 : 
             w_degree = 0.75
         else :
@@ -249,20 +262,11 @@ def get_action():
         turn = {'command': 'A' if diff > 0 else 'D', 'weight': w_degree}
 
         cmd = {
-            'moveAD': turn,
-            'moveWS': forward  # 여기 바꿈꿈
+            'moveWS': forward,
+            'moveAD': turn
         }
 
         combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
-
-        if stop:
-            print("멈추고 갈게요!")
-            cmd_stop = {
-                'moveWS': {'command': "STOP", 'weight': 1.0},
-                'moveAD': {'command': "", 'weight': 0.0}
-            }
-
-            combined_command_cache.append(cmd_stop)
 
     # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
     if len(position_history) == 0:
@@ -281,7 +285,7 @@ def get_action():
 
     # print문 살짝 수정-희연
     print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
-    print(f"🚀 cmd 2개 이상 {combined_command_cache}")
+    print(f"🚀 cmd 2개 {combined_command_cache}")
     return jsonify(combined_command_cache.pop(0))
 
 
@@ -383,3 +387,4 @@ def info():
 # 서버 실행
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
