@@ -1,5 +1,6 @@
-#0602_오전_ 이동 2번 한 후 path 현위치, 최종목적지 재계산.
-# 장애물 근접시 속도 줄이기 추가_김기홍
+# | 현각도 - 목표 각도| 값이 30 이상이면 멈췄다가감 추가_ 희연연
+# path 2개 이동후 재계산 추가_ 희연
+# 장애물 근접시 속도 줄이기 추가_김기홍님
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
 from queue import PriorityQueue
@@ -179,7 +180,7 @@ def get_action():
     current_grid = (int(pos_x), int(pos_z))
     path = a_star(current_grid, destination)
 
-     ####################### 여기서부터 해보기 (희연)################################################################
+    ####################### 여기서부터 해보기 (희연)################################################################
     # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
 
     # 예전 코드
@@ -194,7 +195,7 @@ def get_action():
     if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
         next_grid = path[1:3]  # 두번째 좌표 참조
     elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
-        next_grid = path[1]      # 한개씩 참조  
+        next_grid = [path[1]]      # 한개씩 참조  
     else: 
         next_grid = current_grid   # 0개면 멈춰라! 도착한거니까!
 
@@ -208,7 +209,7 @@ def get_action():
             stop_cmd['fire'] = False
             return jsonify(stop_cmd)
 
-        target_angle = calculate_angle(current_grid, next_grid[i])  # 현재 좌표에서 두번째 좌표로
+        target_angle = calculate_angle(base_pos, next_grid[i])  # 현재 좌표에서 두번째 좌표로
         diff = (target_angle - current_yaw + 360) % 360   # 현 각도랑 틀어야할 각도 차이 알아내고
         if diff > 180:  # 이거는 정규화 비슷
             diff -= 360
@@ -217,7 +218,7 @@ def get_action():
         distance = math.sqrt((pos_x - destination[0])**2 + (pos_z - destination[1])**2)
 
         # 전방 장애물 감지 _ 기홍님이 새로 추가 0602_ 오늘 아침에 깃허브에서 받음
-        ahead_obstacle = is_obstacle_ahead(current_grid, current_yaw, maze)
+        ahead_obstacle = is_obstacle_ahead(base_pos, current_yaw, maze)
 
         if distance < 50 :   # 앞으로 가는 weight
             w_weight = 0.2
@@ -229,11 +230,17 @@ def get_action():
             w_weight = 0.5
             acceleration = 'W'
 
-        if 0 < abs(diff) < 30 :  # 각도에 주려는 weight
+
+        # 각도가 많이 꺾이면 멈췄다가 가기_희연 
+        #여기에 추가로 stop을 넣어야함.
+        abs_diff = abs(diff)
+        stop = 30 <= abs_diff # 틀어야하는 각도가 30도 이상이면 stop 은 true! 그 아래면 false!!
+
+        if 0 < abs_diff < 30 :  
             w_degree = 0.3
-        elif 30 <= abs(diff) < 60 : 
+        elif 30 <= abs_diff < 60 :    
             w_degree = 0.6
-        elif 60 <= abs(diff) < 90 : 
+        elif 60 <= abs_diff < 90 : 
             w_degree = 0.75
         else :
             w_degree = 1.0
@@ -242,11 +249,20 @@ def get_action():
         turn = {'command': 'A' if diff > 0 else 'D', 'weight': w_degree}
 
         cmd = {
-            'moveWS': forward,
-            'moveAD': turn
+            'moveAD': turn,
+            'moveWS': forward  # 여기 바꿈꿈
         }
 
         combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
+
+        if stop:
+            print("멈추고 갈게요!")
+            cmd_stop = {
+                'moveWS': {'command': "STOP", 'weight': 1.0},
+                'moveAD': {'command': "", 'weight': 0.0}
+            }
+
+            combined_command_cache.append(cmd_stop)
 
     # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
     if len(position_history) == 0:
@@ -265,8 +281,8 @@ def get_action():
 
     # print문 살짝 수정-희연
     print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
-    print(f"🚀 cmd 2개 {combined_command_cache}")
-    return jsonify(cmd)
+    print(f"🚀 cmd 2개 이상 {combined_command_cache}")
+    return jsonify(combined_command_cache.pop(0))
 
 
 
