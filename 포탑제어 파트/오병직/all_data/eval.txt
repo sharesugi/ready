@@ -1,0 +1,6 @@
+=== y_angle 예측 성능 ===
+                 Model     MAE_y    RMSE_y      R2_y
+0        Position Only  1.033246  1.340617  0.984256
+1  Position + Distance  0.286330  0.525747  0.997579
+2        Distance Only  4.978907  9.497897  0.209751
+3        Distance + dy  0.157624  0.350413  0.998924
