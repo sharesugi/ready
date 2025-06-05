@@ -1,3 +1,7 @@
+# 0605_ 총 이동거리 값 시각화 출력_상조
+# 0604_기홍님 휴리스틱 함수 추가 
+# path 2개 이동후 재계산 추가_ 희연(틀어야할 각도가 클때 멈추는건 뺌. 같이 있으면 성능 안 좋아짐)
+# 장애물 근접시 속도 줄이기 추가_김기홍님
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
 from queue import PriorityQueue
@@ -5,13 +9,14 @@ import os
 import torch
 from ultralytics import YOLO
 import math
+import heapq
 import cv2
 import numpy as np
 import csv
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
-import time
+
 # Flask 앱 초기화 및 YOLO 모델 로드
 app = Flask(__name__)
 model = YOLO('yolov8n.pt')
@@ -54,8 +59,12 @@ class Node:
     def __lt__(self, other):
         return self.f < other.f
 
-def heuristic(a, b):
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+def heuristic(a, b): # Diagonal (Octile) 방식으로 heuristic 변경
+    dx = abs(a[0] - b[0])
+    dy = abs(a[1] - b[1])
+    D = 1
+    D2 = math.sqrt(2)
+    return D * (dx + dy) + (D2 - 2 * D) * min(dx, dy)
 
 def get_neighbors(pos):
     neighbors = []
@@ -66,7 +75,7 @@ def get_neighbors(pos):
             if dx != 0 and dz != 0:
                 if maze[pos[1]][x] == 1 or maze[z][pos[0]] == 1:
                     continue  # 대각선 경로에 인접한 직선 중 하나라도 막혀있으면 skip # 즉 모서리를 못 뚫고 지나가게 수정
-            if maze[z][x] == 0:
+            if maze[z][x] == 0: 
                 neighbors.append((x, z))
     return neighbors
 
@@ -86,7 +95,14 @@ def a_star(start, goal):
         for nbr in get_neighbors(current.position):
             if nbr in closed: continue
             node = Node(nbr, current)
-            node.g = current.g + 1
+
+            # 이 부분 추가함.
+            dx = abs(nbr[0] - current.position[0])
+            dz = abs(nbr[1] - current.position[1])
+            step_cost = math.sqrt(2) if dx != 0 and dz != 0 else 1
+
+            
+            node.g = current.g + step_cost
             node.h = heuristic(nbr, goal)
             node.f = node.g + node.h
             open_set.put((node.f, node))
@@ -100,11 +116,34 @@ def calculate_angle(current, next_pos): # A*알고리즘을 통해서 어디로 
     dz = next_pos[1] - current[1]
     return (math.degrees(math.atan2(dz, dx)) + 360) % 360
 
+# 전방 장애물 감지 함수_ 기홍님 추가 _0602_ 아침에 깃허브에서 받음
+# 함수 설명:이동하기 전에, 지금 위치와 현재 바라보는 방향(yaw)을 기준으로 
+# 앞으로 radius만큼 한 칸씩 쭉 살펴봐서, 장애물(maze에서 1로 표시된 곳)이 있으면 미리 감지. 
+# 그래서 아직 이동하지 않았어도 앞으로 막히는지 미리 확인 가능.
+def is_obstacle_ahead(pos, yaw, maze, radius=30):
+    """
+    현재 yaw(도 단위) 방향 기준 전방 radius만큼 검사.
+    장애물(maze=1)이 있으면 True 리턴.
+    """
+    x, z = pos   # 현좌표
+    rad = math.radians(yaw)   # 현각도 라디안으로 변경
+    dx = math.cos(rad)       
+    dz = math.sin(rad)
+
+    for step in range(1, radius + 1):
+        nx = int(round(x + dx * step))
+        nz = int(round(z + dz * step))
+        if 0 <= nx < GRID_SIZE and 0 <= nz < GRID_SIZE:
+            if maze[nz][nx] == 1:
+                print(f"⚠️ 전방 장애물 감지: ({nx},{nz})")
+                return True
+    return False
+
+
 # 장애물 맵 유효 위치 확인
 def is_valid_pos(pos, size=GRID_SIZE): # 장애물이 300x300 안에 있는지 확인
     x, z = pos
     return 0 <= x < size and 0 <= z < size
-
 
 # Flask API 라우팅 시작
 @app.route('/init', methods=['GET'])
@@ -125,12 +164,12 @@ def init():
     print("🛠️ /init config:", config)
     return jsonify(config)
 
+# 여기 리스트에 cmd 2개를 넣는다
+combined_command_cache = []
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global target_reached, previous_position, current_yaw, current_position, last_position
-    global turn_state, turn_timestamp
-
     data = request.get_json(force=True)
     pos = data.get('position', {})
     pos_x = float(pos.get('x', 0))
@@ -139,6 +178,19 @@ def get_action():
     if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0:
         target_reached = True
         print("✨ 목표 도달: 전차 정지 플래그 설정")
+# =======================================================================
+#         # ✅ 도착 시 전체 이동 거리 계산
+#     try:
+#         df = pd.read_csv("tank_path0.csv")
+#         total_dist = 0.0
+#         for i in range(1, len(df)):
+#             x1, z1 = df.iloc[i - 1]
+#             x2, z2 = df.iloc[i]
+#             total_dist += math.sqrt((x2 - x1)**2 + (z2 - z1)**2)
+#         print(f"🏁 총 이동 거리: {total_dist:.2f} 단위")
+#     except Exception as e:
+#         print(f"❌ 거리 계산 중 오류 발생: {e}")
+# =======================================================================
         
     if target_reached:
         stop_cmd = {k: {'command': 'STOP', 'weight': 1.0} for k in ['moveWS', 'moveAD']}
@@ -153,127 +205,112 @@ def get_action():
 
     current_grid = (int(pos_x), int(pos_z))
     path = a_star(current_grid, destination)
-    next_grid = path[1] if len(path) > 1 else current_grid
 
-    if not is_valid_pos(next_grid):
-        stop_cmd = {k: {'command': '', 'weight': 0.0} for k in ['moveWS', 'moveAD']}
-        stop_cmd['fire'] = False
-        return jsonify(stop_cmd)
+    ####################### 여기서부터 해보기 (희연)################################################################
+    # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
 
-    target_angle = calculate_angle(current_grid, next_grid)
-    diff = (target_angle - current_yaw + 360) % 360
-    if diff > 180:
-        diff -= 360
+    # 예전 코드
+    # next_grid = path[1] if len(path) > 1 else current_grid
 
-    distance = math.sqrt((pos_x - destination[0])**2 + (pos_z - destination[1])**2)
+    if combined_command_cache:
+    # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
+        cmd = combined_command_cache.pop(0)
+        return jsonify(cmd)
 
-    if distance < 60:
-        w_weight = 0.1
-    else:
-        w_weight = 0.6
+    
+    if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
+        next_grid = path[1:3]  # 두번째 좌표 참조
+    elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
+        next_grid = [path[1]]      # 한개씩 참조  
+    else: 
+        next_grid = [current_grid]   # 0개면 멈춰라! 도착한거니까!
 
-    if 0 < abs(diff) < 30:
-        w_degree = 0.3
-    elif 30 <= abs(diff) < 60:
-        w_degree = 0.6
-    elif 60 <= abs(diff) < 90:
-        w_degree = 0.75
-    else:
-        w_degree = 1.0
+    for i in range(len(next_grid)):  # 두개의 좌표가 맵을 빠져나기지 않는지 확인 # 0, 1
 
-    # 타임스탬프 변수 초기화
-    if 'turn_state' not in globals():
-        turn_state = 'IDLE'
-        turn_timestamp = time.time()
+        # next_grid[1]의 회전 각도는 current 가 아니라 next_grid[0]에서 게산해야 맞음 
+        base_pos = current_grid if i == 0 else next_grid[i - 1]  
+    
+        if not is_valid_pos(next_grid[i]):  # 가야하는 곳이 맵 외에 있으면 움직이는거 멈춤
+            stop_cmd = {k: {'command': '', 'weight': 0.0} for k in ['moveWS', 'moveAD']}
+            stop_cmd['fire'] = False
+            return jsonify(stop_cmd)
 
-    cmd = {}
-    now = time.time()
+        target_angle = calculate_angle(base_pos, next_grid[i])  # 현재 좌표에서 두번째 좌표로
+        diff = (target_angle - current_yaw + 360) % 360   # 현 각도랑 틀어야할 각도 차이 알아내고
+        if diff > 180:  # 이거는 정규화 비슷
+            diff -= 360
 
-    if abs(diff) >= 70:
-        elapsed = now - turn_timestamp
+        # 이건 그냥 유클리드 거리. sqrt는 제곱근! 현위치랑 목적좌표까지의 거리 
+        distance = math.sqrt((pos_x - destination[0])**2 + (pos_z - destination[1])**2)
 
-        if turn_state == 'IDLE':
-            # 멈추고 대기 1초
-            cmd = {
-                'moveWS': {'command': 'STOP', 'weight': 1.0},
-                'moveAD': {'command': 'STOP', 'weight': 0.0}
-            }
-            if elapsed >= 1.0:
-                turn_state = 'TURN'
-                turn_timestamp = now
+        # 전방 장애물 감지 _ 기홍님이 새로 추가 0602_ 오늘 아침에 깃허브에서 받음
+        ahead_obstacle = is_obstacle_ahead(base_pos, current_yaw, maze)
 
-        elif turn_state == 'TURN':
-            # 회전 1초
-            cmd = {
-                'moveWS': {'command': 'STOP', 'weight': 1.0},
-                'moveAD': {'command': 'A' if diff > 0 else 'D', 'weight': 0.7}
-            }
-            if elapsed >= 1.0:
-                turn_state = 'STOP_AFTER_TURN'
-                turn_timestamp = now
+        if distance < 40 :   # 앞으로 가는 weight
+            w_weight = 0.1
+            acceleration = 'S'
+        elif ahead_obstacle:
+            w_weight = 0.1  # 전방에 장애물 있을 경우 감속
+            acceleration = 'S'
+        else:
+            w_weight = 0.3
+            acceleration = 'W'
 
-        elif turn_state == 'STOP_AFTER_TURN':
-            # 회전 후 멈춤 1초
-            cmd = {
-                'moveWS': {'command': 'STOP', 'weight': 1.0},
-                'moveAD': {'command': 'STOP', 'weight': 0.0}
-            }
-            if elapsed >= 1.0:
-                turn_state = 'FORWARD'
-                turn_timestamp = now
 
-        elif turn_state == 'FORWARD':
-            # 전진 1초
-            cmd = {
-                'moveWS': {'command': 'W', 'weight': 0.3},
-                'moveAD': {'command': 'A' if diff > 0 else 'D', 'weight': 0.3}
-            }
-            if elapsed >= 1.0 or abs(diff) < 30:
-                turn_state = 'IDLE'
-                turn_timestamp = now
+        # 각도가 많이 꺾이면 멈췄다가 가기_희연 
+        #여기에 추가로 stop을 넣어야함.
+        abs_diff = abs(diff)
+        stop = 30 <= abs_diff # 틀어야하는 각도가 30도 이상이면 stop 은 true! 그 아래면 false!!
 
-    else:
-        # diff 작으면 그냥 전진+조향, 상태 초기화
+        if 0 < abs_diff < 30 :  
+            w_degree = 0.3
+        elif 30 <= abs_diff < 60 :    
+            w_degree = 0.6
+            stop = True
+        elif 60 <= abs_diff < 90 : 
+            w_degree = 0.75
+        else :
+            w_degree = 1.0
+    
+        forward = {'command': acceleration, 'weight': w_weight}
+        turn = {'command': 'A' if diff > 0 else 'D', 'weight': w_degree}
+
         cmd = {
-            'moveWS': {'command': 'W' , 'weight': 0.2},
-            'moveAD': {'command': 'A' if diff > 0 else 'D', 'weight': w_degree}
+            'moveWS': forward,
+            'moveAD': turn
         }
-        turn_state = 'IDLE'
-        turn_timestamp = now
 
-    # 최초 경로 계산 및 기록
+        combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
+
+    # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
     if len(position_history) == 0:
-        path = a_star((int(pos_x), int(pos_z)), destination)
+        path = a_star((int(pos_x), int(pos_z)), destination)  # 현 위치에서 최종 목적지까지 다시 계산
         df = pd.DataFrame(path, columns=["x", "z"])
         df.to_csv("a_star_path.csv", index=False)
 
+    
     if current_grid:
         last_position = current_grid
     position_history.append(current_grid)
+# ===============================================================
+    # ✅ 실시간 거리 누적 계산 추가
+    if len(position_history) > 1:
+        x1, z1 = position_history[-2] # 이전 좌표
+        x2, z2 = position_history[-1] # 현재 좌표
+        step_distance = math.sqrt((x2 - x1)**2 + (z2 - z1)**2) # 가장 최근 두 지점의 좌표 추출
+        if "total_distance" not in globals():                  # total_distance 라는 전역 변수가 없으면 새로 초기화 (처음 실행 시 필요)
+            total_distance = 0.0
+        total_distance += step_distance                        # 지금 이동한 거리(step_distance)를 누적 거리(total_distance)에 더함
+        print(f"📏 누적 이동 거리: {total_distance:.2f}")      # 실시간 거리 로그 출력
+    
+    df = pd.DataFrame(position_history, columns=["x", "z"])   # 실시간으로 누적된 위치들을 csv로 저장하여,
+    df.to_csv("tank_path0.csv", index=False)                  # 나중에 경로를 시각화하거나 분석할 수 있도록 함.
+# ===============================================================
 
-    df = pd.DataFrame(position_history, columns=["x", "z"])
-    df.to_csv("tank_path0.csv", index=False)
-
-    print(f"📍 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} trg={target_angle:.1f} diff={diff:.1f}")
-    print(f"🚦 state={turn_state} ⏳ elapsed={now - turn_timestamp:.2f}s 🚀 cmd={cmd}")
-    return jsonify(cmd)
-
-    # 최초 경로 계산 및 로깅
-    if len(position_history) == 0:
-        path = a_star((int(pos_x), int(pos_z)), destination)
-        df = pd.DataFrame(path, columns=["x", "z"])
-        df.to_csv("a_star_path.csv", index=False)
-
-    if current_grid:
-        last_position = current_grid
-    position_history.append(current_grid)
-
-    df = pd.DataFrame(position_history, columns=["x", "z"])
-    df.to_csv("tank_path0.csv", index=False)
-
-    print(f"📍 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} trg={target_angle:.1f} diff={diff:.1f}")
-    print(f"🚦 state={turn_state} 🚀 cmd={cmd}")
-    return jsonify(cmd)
+    # print문 살짝 수정-희연
+    print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
+    print(f"🚀 cmd 2개 {combined_command_cache}")
+    return jsonify(combined_command_cache.pop(0))
 
 
 
@@ -326,7 +363,7 @@ def update_obstacle():
             })
 
             # A* 계산용 좌표는 buffer 포함
-            buffer = 5
+            buffer = 7
             x_min = max(0, int(obs["x_min"]) - buffer)
             x_max = min(GRID_SIZE - 1, int(obs["x_max"]) + buffer)
             z_min = max(0, int(obs["z_min"]) - buffer)
@@ -374,4 +411,3 @@ def info():
 # 서버 실행
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
