@@ -1,4 +1,5 @@
-# 0604_기홍님 휴리스틱 함수 추가 
+# 0605_ 시작지점 -> 목적지점 도달 시간 추가_희연
+# 0604_휴리스틱 함수 추가_기홍님 
 # path 2개 이동후 재계산 추가_ 희연(틀어야할 각도가 클때 멈추는건 뺌. 같이 있으면 성능 안 좋아짐)
 # 장애물 근접시 속도 줄이기 추가_김기홍님
 # Flask 및 필요한 라이브러리 불러오기
@@ -15,10 +16,12 @@ import csv
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
+import time  # 추가0605
 
 # Flask 앱 초기화 및 YOLO 모델 로드
 app = Flask(__name__)
 model = YOLO('yolov8n.pt')
+
 
 # 전역 설정값 및 변수 초기화
 GRID_SIZE = 300  # 맵 크기
@@ -41,11 +44,14 @@ target_reached = False  # 목표 도달 유무 플래그
 current_angle = 0.0  # 실제 플레이어의 차체 각도 저장용 (degree) -> playerBodyX 받아오는 방법 사용해 볼 것임.
 
 # 시각화 관련 부분
-
 # 이동 경로 그림 그릴 때 필요함.
 current_position = None
 last_position = None
 position_history = []
+
+# 시간 세는 부분
+start_time = None
+end_time = None
 
 # A* 알고리즘 관련 클래스 및 함수 정의
 class Node:
@@ -169,13 +175,22 @@ combined_command_cache = []
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global target_reached, previous_position, current_yaw, current_position, last_position
+    global start_time, end_time
     data = request.get_json(force=True)
     pos = data.get('position', {})
     pos_x = float(pos.get('x', 0))
     pos_z = float(pos.get('z', 0))
 
+    # tracking_mode가 True일 때만 시간 측정 시작
+    if start_time is None: # 추가0605
+        start_time = time.time()   # 추가0605
+        print("🟢 trackingMode 활성화: 시간 기록 시작")  # 추가0605
+        
     if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0:
-        target_reached = True
+        target_reached = True  
+        end_time = time.time()  # 추가0605
+        elapsed = end_time - start_time  # 추가0605
+        print(f"⏱️ 도착까지 걸린 시간: {elapsed:.3f}초")# 추가0605
         print("✨ 목표 도달: 전차 정지 플래그 설정")
         
     if target_reached:
@@ -387,4 +402,3 @@ def info():
 # 서버 실행
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
