@@ -178,6 +178,18 @@ def init():
     print("🛠️ /init config:", config)
     return jsonify(config)
 
+def calculate_actual_path():
+    global total_distance
+    
+    if len(position_history) > 1:
+        for i in range(len(position_history) -1):
+            x1, z1 = position_history[i] # 이전 좌표
+            x2, z2 = position_history[i+1] # 현재 좌표
+            step_distance = math.sqrt((x2 - x1)**2 + (z2 - z1)**2) # 가장 최근 두 지점의 좌표 추출
+            total_distance += step_distance                        # 지금 이동한 거리(step_distance)를 누적 거리(total_distance)에 더함
+    return total_distance
+
+    
 # 여기 리스트에 cmd 2개를 넣는다
 combined_command_cache = []
 
@@ -192,14 +204,15 @@ def get_action():
 
     # tracking_mode가 True일 때만 시간 측정 시작
     if start_time is None: # 추가0605
-        start_time = time.time()   # 추가0605
-        print("🟢 trackingMode 활성화: 시간 기록 시작")  # 추가0605
+        start_time = time.time()  
+        print("🟢 trackingMode 활성화: 시간 기록 시작")  
         
     if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0:
         target_reached = True  
         end_time = time.time()  # 추가0605
-        elapsed = end_time - start_time  # 추가0605
-        print(f"⏱️ 도착까지 걸린 시간: {elapsed:.3f}초")# 추가0605
+        elapsed = end_time - start_time  
+        print(f"⏱️ 도착까지 걸린 시간: {elapsed:.3f}초")
+        print(f"이동거리: {calculate_actual_path():.3f}")
         print("✨ 목표 도달: 전차 정지 플래그 설정")
         
     if target_reached:
@@ -216,17 +229,13 @@ def get_action():
     current_grid = (int(pos_x), int(pos_z))
     path = a_star(current_grid, destination)
 
-    ####################### 여기서부터 해보기 (희연)################################################################
+    #######################################################################
     # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
-
-    # 예전 코드
-    # next_grid = path[1] if len(path) > 1 else current_grid
 
     if combined_command_cache:
     # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
         cmd = combined_command_cache.pop(0)
         return jsonify(cmd)
-
     
     if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
         next_grid = path[1:3]  # 두번째 좌표 참조
@@ -266,12 +275,7 @@ def get_action():
             w_weight = 0.5
             acceleration = 'W'
 
-
-        # 각도가 많이 꺾이면 멈췄다가 가기_희연 
-        #여기에 추가로 stop을 넣어야함.
         abs_diff = abs(diff)
-        stop = 30 <= abs_diff # 틀어야하는 각도가 30도 이상이면 stop 은 true! 그 아래면 false!!
-
         if 0 < abs_diff < 30 :  
             w_degree = 0.3
         elif 30 <= abs_diff < 60 :    
