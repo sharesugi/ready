@@ -164,6 +164,7 @@ def get_action():
         print(f"⏱️ 도착까지 걸린 시간: {elapsed:.3f}초")# 추가0605        
         print("✨ 목표 도달: 전차 정지 플래그 설정")
         print(f"이동거리: {calculate_actual_path():.3f}")
+        print(f"📊 총 충돌 횟수: {collision_count}회")
         
     if target_reached:
         stop_cmd = {k: {'command': 'STOP', 'weight': 1.0} for k in ['moveWS', 'moveAD']}
@@ -385,13 +386,13 @@ def update_obstacle():
     return jsonify({"status": "OK", "count": len(obstacles)})
 
 
-
 @app.route('/info', methods=['POST'])
 def info():
     data = request.get_json(force=True)
     if not data:
         return jsonify({"error": "No JSON received"}), 400
 
+      
 
     # 전체 구조 출력 (디버그용)
     # print("📨 /info data received:", data)
@@ -404,4 +405,9 @@ def info():
 
 # 서버 실행
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    try:
+        app.run(host='0.0.0.0', port=5000)
+    except KeyboardInterrupt:
+        print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
+    finally:
+        print(f"📊 총 충돌 횟수: {collision_count}회")
