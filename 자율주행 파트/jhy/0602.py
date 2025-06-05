@@ -42,12 +42,21 @@ current_yaw = INITIAL_YAW  # 현재 차체 방향 추정치 -> playerBodyX로 �
 previous_position = None  # 이전 위치 (yaw 계산용)
 target_reached = False  # 목표 도달 유무 플래그
 current_angle = 0.0  # 실제 플레이어의 차체 각도 저장용 (degree) -> playerBodyX 받아오는 방법 사용해 볼 것임.
+collision_count = 0  # 충돌 횟수 카운터 추가
 
 # 시각화 관련 부분
-# 이동 경로 그림 그릴 때 필요함.
 current_position = None
 last_position = None
 position_history = []
+original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
+collision_points = [] # 전역변수에 collision point 추가(충돌 그림에 필요)
+
+# 충돌 없을 때 파일 저장
+with open('collision_points.json', 'w') as f:
+    json.dump({
+        "collision_count": 0,
+        "collision_points": []
+    }, f, indent=2)
 
 # 시간 세는 부분
 start_time = None
@@ -326,14 +335,28 @@ def start():
 
 @app.route('/collision', methods=['POST'])
 def collision():
+    global collision_points, collision_count
     d = request.get_json(force=True)
-    obj = d.get('objectName')
     p = d.get('position', {})
-    print(f"Collision {obj} at ({p.get('x')},{p.get('y')},{p.get('z')})")
-    return jsonify({'status': 'success', 'message': 'Collision received'})
+    x = p.get('x')
+    z = p.get('z')
 
+    if x is not None and z is not None:
+        collision_points.append((x, z))
+        collision_count += 1  # 충돌 횟수 증가
 
-original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
+        # 저장 파일 구조: 충돌 좌표 목록과 총 횟수 포함
+        save_data = {
+            "collision_count": collision_count,
+            "collision_points": collision_points
+        }
+
+        with open('collision_points.json', 'w') as f:
+            json.dump(save_data, f, indent=2)
+
+        print(f"💥 Collision #{collision_count} at ({x}, {z})")
+
+    return jsonify({'status': 'success', 'collision_count': collision_count})
 
 @app.route('/update_obstacle', methods=['POST'])
 def update_obstacle():
@@ -354,7 +377,7 @@ def update_obstacle():
             })
 
             # A* 계산용 좌표는 buffer 포함
-            buffer = 7
+            buffer = 5
             x_min = max(0, int(obs["x_min"]) - buffer)
             x_max = min(GRID_SIZE - 1, int(obs["x_max"]) + buffer)
             z_min = max(0, int(obs["z_min"]) - buffer)
@@ -383,7 +406,6 @@ def update_obstacle():
     return jsonify({"status": "OK", "count": len(obstacles)})
 
 
-
 @app.route('/info', methods=['POST'])
 def info():
     data = request.get_json(force=True)
@@ -401,4 +423,9 @@ def info():
 
 # 서버 실행
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    try:
+        app.run(host='0.0.0.0', port=5000)
+    except KeyboardInterrupt:
+        print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
+    finally:
+        print(f"📊 총 충돌 횟수: {collision_count}회")
