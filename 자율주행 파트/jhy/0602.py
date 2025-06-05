@@ -1,5 +1,6 @@
-# | 현각도 - 목표 각도| 값이 30 이상이면 멈췄다가감 추가_ 희연연
-# path 2개 이동후 재계산 추가_ 희연
+# 0605_ 시작지점 -> 목적지점 도달 시간, 이동거리, 충돌횟수 추가_희연
+# 0604_휴리스틱 함수 추가_기홍님 
+# path 2개 이동후 재계산 추가_ 희연(틀어야할 각도가 클때 멈추는건 뺌. 같이 있으면 성능 안 좋아짐)
 # 장애물 근접시 속도 줄이기 추가_김기홍님
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
@@ -8,16 +9,19 @@ import os
 import torch
 from ultralytics import YOLO
 import math
+import heapq
 import cv2
 import numpy as np
 import csv
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
+import time  # 추가0605
 
 # Flask 앱 초기화 및 YOLO 모델 로드
 app = Flask(__name__)
 model = YOLO('yolov8n.pt')
+
 
 # 전역 설정값 및 변수 초기화
 GRID_SIZE = 300  # 맵 크기
@@ -38,13 +42,25 @@ current_yaw = INITIAL_YAW  # 현재 차체 방향 추정치 -> playerBodyX로 �
 previous_position = None  # 이전 위치 (yaw 계산용)
 target_reached = False  # 목표 도달 유무 플래그
 current_angle = 0.0  # 실제 플레이어의 차체 각도 저장용 (degree) -> playerBodyX 받아오는 방법 사용해 볼 것임.
+collision_count = 0  # 충돌 횟수 카운터 추가
 
 # 시각화 관련 부분
-
-# 이동 경로 그림 그릴 때 필요함.
 current_position = None
 last_position = None
 position_history = []
+original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
+collision_points = [] # 전역변수에 collision point 추가(충돌 그림에 필요)
+
+# 충돌 없을 때 파일 저장
+with open('collision_points.json', 'w') as f:
+    json.dump({
+        "collision_count": 0,
+        "collision_points": []
+    }, f, indent=2)
+
+# 시간 세는 부분
+start_time = None
+end_time = None
 
 # A* 알고리즘 관련 클래스 및 함수 정의
 class Node:
@@ -57,8 +73,12 @@ class Node:
     def __lt__(self, other):
         return self.f < other.f
 
-def heuristic(a, b):
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+def heuristic(a, b): # Diagonal (Octile) 방식으로 heuristic 변경
+    dx = abs(a[0] - b[0])
+    dy = abs(a[1] - b[1])
+    D = 1
+    D2 = math.sqrt(2)
+    return D * (dx + dy) + (D2 - 2 * D) * min(dx, dy)
 
 def get_neighbors(pos):
     neighbors = []
@@ -89,7 +109,14 @@ def a_star(start, goal):
         for nbr in get_neighbors(current.position):
             if nbr in closed: continue
             node = Node(nbr, current)
-            node.g = current.g + 1
+
+            # 이 부분 추가함.
+            dx = abs(nbr[0] - current.position[0])
+            dz = abs(nbr[1] - current.position[1])
+            step_cost = math.sqrt(2) if dx != 0 and dz != 0 else 1
+
+            
+            node.g = current.g + step_cost
             node.h = heuristic(nbr, goal)
             node.f = node.g + node.h
             open_set.put((node.f, node))
@@ -150,20 +177,43 @@ def init():
     }
     print("🛠️ /init config:", config)
     return jsonify(config)
+    
+total_distance = 0.0
+def calculate_actual_path():
+    global total_distance
+    
+    if len(position_history) > 1:
+        for i in range(len(position_history) -1):
+            x1, z1 = position_history[i] # 이전 좌표
+            x2, z2 = position_history[i+1] # 현재 좌표
+            step_distance = math.sqrt((x2 - x1)**2 + (z2 - z1)**2) # 가장 최근 두 지점의 좌표 추출
+            total_distance += step_distance                        # 지금 이동한 거리(step_distance)를 누적 거리(total_distance)에 더함
+    return total_distance
 
+    
 # 여기 리스트에 cmd 2개를 넣는다
 combined_command_cache = []
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global target_reached, previous_position, current_yaw, current_position, last_position
+    global start_time, end_time
     data = request.get_json(force=True)
     pos = data.get('position', {})
     pos_x = float(pos.get('x', 0))
     pos_z = float(pos.get('z', 0))
 
+    # tracking_mode가 True일 때만 시간 측정 시작
+    if start_time is None: # 추가0605
+        start_time = time.time()  
+        print("🟢 trackingMode 활성화: 시간 기록 시작")  
+        
     if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0:
-        target_reached = True
+        target_reached = True  
+        end_time = time.time()  # 추가0605
+        elapsed = end_time - start_time  
+        print(f"⏱️ 도착까지 걸린 시간: {elapsed:.3f}초")
+        print(f"이동거리: {calculate_actual_path():.3f}")
         print("✨ 목표 도달: 전차 정지 플래그 설정")
         
     if target_reached:
@@ -180,24 +230,20 @@ def get_action():
     current_grid = (int(pos_x), int(pos_z))
     path = a_star(current_grid, destination)
 
-    ####################### 여기서부터 해보기 (희연)################################################################
+    #######################################################################
     # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
-
-    # 예전 코드
-    # next_grid = path[1] if len(path) > 1 else current_grid
 
     if combined_command_cache:
     # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
         cmd = combined_command_cache.pop(0)
         return jsonify(cmd)
-
     
     if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
         next_grid = path[1:3]  # 두번째 좌표 참조
     elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
         next_grid = [path[1]]      # 한개씩 참조  
     else: 
-        next_grid = current_grid   # 0개면 멈춰라! 도착한거니까!
+        next_grid = [current_grid]   # 0개면 멈춰라! 도착한거니까!
 
     for i in range(len(next_grid)):  # 두개의 좌표가 맵을 빠져나기지 않는지 확인 # 0, 1
 
@@ -230,16 +276,12 @@ def get_action():
             w_weight = 0.5
             acceleration = 'W'
 
-
-        # 각도가 많이 꺾이면 멈췄다가 가기_희연 
-        #여기에 추가로 stop을 넣어야함.
         abs_diff = abs(diff)
-        stop = 30 <= abs_diff # 틀어야하는 각도가 30도 이상이면 stop 은 true! 그 아래면 false!!
-
         if 0 < abs_diff < 30 :  
             w_degree = 0.3
         elif 30 <= abs_diff < 60 :    
             w_degree = 0.6
+            stop = True
         elif 60 <= abs_diff < 90 : 
             w_degree = 0.75
         else :
@@ -249,20 +291,11 @@ def get_action():
         turn = {'command': 'A' if diff > 0 else 'D', 'weight': w_degree}
 
         cmd = {
-            'moveAD': turn,
-            'moveWS': forward  # 여기 바꿈꿈
+            'moveWS': forward,
+            'moveAD': turn
         }
 
         combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
-
-        if stop:
-            print("멈추고 갈게요!")
-            cmd_stop = {
-                'moveWS': {'command': "STOP", 'weight': 1.0},
-                'moveAD': {'command': "", 'weight': 0.0}
-            }
-
-            combined_command_cache.append(cmd_stop)
 
     # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
     if len(position_history) == 0:
@@ -281,7 +314,7 @@ def get_action():
 
     # print문 살짝 수정-희연
     print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
-    print(f"🚀 cmd 2개 이상 {combined_command_cache}")
+    print(f"🚀 cmd 2개 {combined_command_cache}")
     return jsonify(combined_command_cache.pop(0))
 
 
@@ -307,14 +340,28 @@ def start():
 
 @app.route('/collision', methods=['POST'])
 def collision():
+    global collision_points, collision_count
     d = request.get_json(force=True)
-    obj = d.get('objectName')
     p = d.get('position', {})
-    print(f"Collision {obj} at ({p.get('x')},{p.get('y')},{p.get('z')})")
-    return jsonify({'status': 'success', 'message': 'Collision received'})
+    x = p.get('x')
+    z = p.get('z')
 
+    if x is not None and z is not None:
+        collision_points.append((x, z))
+        collision_count += 1  # 충돌 횟수 증가
 
-original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
+        # 저장 파일 구조: 충돌 좌표 목록과 총 횟수 포함
+        save_data = {
+            "collision_count": collision_count,
+            "collision_points": collision_points
+        }
+
+        with open('collision_points.json', 'w') as f:
+            json.dump(save_data, f, indent=2)
+
+        print(f"💥 Collision #{collision_count} at ({x}, {z})")
+
+    return jsonify({'status': 'success', 'collision_count': collision_count})
 
 @app.route('/update_obstacle', methods=['POST'])
 def update_obstacle():
@@ -335,7 +382,7 @@ def update_obstacle():
             })
 
             # A* 계산용 좌표는 buffer 포함
-            buffer = 7
+            buffer = 5
             x_min = max(0, int(obs["x_min"]) - buffer)
             x_max = min(GRID_SIZE - 1, int(obs["x_max"]) + buffer)
             z_min = max(0, int(obs["z_min"]) - buffer)
@@ -364,7 +411,6 @@ def update_obstacle():
     return jsonify({"status": "OK", "count": len(obstacles)})
 
 
-
 @app.route('/info', methods=['POST'])
 def info():
     data = request.get_json(force=True)
@@ -382,4 +428,9 @@ def info():
 
 # 서버 실행
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    try:
+        app.run(host='0.0.0.0', port=5000)
+    except KeyboardInterrupt:
+        print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
+    finally:
+        print(f"📊 총 충돌 횟수: {collision_count}회")
