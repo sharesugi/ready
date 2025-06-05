@@ -5,9 +5,9 @@
 ---
 - 0605
 - 추가기능: (시작점 -> 목적지) 도달 시간 추가
-  - tracking mode 누른 시점부터 시간 셈 
-- 기존기능: path2 + 기홍님 휴리스틱 코드
-![image](https://github.com/user-attachments/assets/a1f592ad-21b7-4fcb-b93a-0af7b07a79d0)
+  - tracking mode 누른 시점부터 시간 셈   
+- 기존기능: path2 + 기홍님 휴리스틱 코드  
+![image](https://github.com/user-attachments/assets/a1f592ad-21b7-4fcb-b93a-0af7b07a79d0)  
 ---
 - 0604
 - 기능: path2 + 기홍님 휴리스틱 코드  
