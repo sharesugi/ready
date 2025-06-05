@@ -1,4 +1,4 @@
-# 0605_ 시작지점 -> 목적지점 도달 시간 추가_희연
+# 0605_ 시작지점 -> 목적지점 도달 시간, 이동거리, 충돌횟수 추가
 # 0604_휴리스틱 함수 추가_기홍님 
 # path 2개 이동후 재계산 추가_ 희연(틀어야할 각도가 클때 멈추는건 뺌. 같이 있으면 성능 안 좋아짐)
 # 장애물 근접시 속도 줄이기 추가_김기홍님
@@ -177,7 +177,8 @@ def init():
     }
     print("🛠️ /init config:", config)
     return jsonify(config)
-
+    
+total_distance = 0.0
 def calculate_actual_path():
     global total_distance
     
