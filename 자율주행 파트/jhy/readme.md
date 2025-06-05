@@ -4,7 +4,7 @@
 - path2: 2번 이동후 path 재계산하는 기능
 ---
 ### 0605
-- 추가기능: (시작점 -> 목적지) 도달 시간 추가
+- 추가기능: (시작점 -> 목적지) 도달 시간, 이동거리, 충돌횟수 추가
   - tracking mode 누른 시점부터 시간 셈   
 - 기존기능: path2 + 기홍님 휴리스틱 코드
 ![image](https://github.com/user-attachments/assets/4c03bdf1-6218-462d-81d1-f1dfc649bab6)  
