@@ -46,6 +46,7 @@ end_time = None
 current_position = None
 last_position = None
 position_history = []
+total_distance = 0.0 
 
 # A* 알고리즘 관련 클래스 및 함수 정의
 class Node:
@@ -108,7 +109,17 @@ def calculate_angle(current, next_pos): # A*알고리즘을 통해서 어디로 
 def is_valid_pos(pos, size=GRID_SIZE): # 장애물이 300x300 안에 있는지 확인
     x, z = pos
     return 0 <= x < size and 0 <= z < size
-
+#거리 계산하는 함수 
+def calculate_actual_path():
+    global total_distance
+    
+    if len(position_history) > 1:
+        for i in range(len(position_history) -1):
+            x1, z1 = position_history[i] # 이전 좌표
+            x2, z2 = position_history[i+1] # 현재 좌표
+            step_distance = math.sqrt((x2 - x1)**2 + (z2 - z1)**2) # 가장 최근 두 지점의 좌표 추출
+            total_distance += step_distance                        # 지금 이동한 거리(step_distance)를 누적 거리(total_distance)에 더함
+    return total_distance
 
 # Flask API 라우팅 시작
 @app.route('/init', methods=['GET'])
@@ -152,6 +163,7 @@ def get_action():
         elapsed = end_time - start_time  # 추가0605
         print(f"⏱️ 도착까지 걸린 시간: {elapsed:.3f}초")# 추가0605        
         print("✨ 목표 도달: 전차 정지 플래그 설정")
+        print(f"이동거리: {calculate_actual_path():.3f}")
         
     if target_reached:
         stop_cmd = {k: {'command': 'STOP', 'weight': 1.0} for k in ['moveWS', 'moveAD']}
@@ -380,7 +392,6 @@ def info():
     if not data:
         return jsonify({"error": "No JSON received"}), 400
 
-      
 
     # 전체 구조 출력 (디버그용)
     # print("📨 /info data received:", data)
