@@ -52,7 +52,7 @@ def detect():
     target_classes = {1: "car1", 2: "car2", 3: "tank", 4: "human"}
     filtered_results = []
     for box in detections:
-        if box[4] >= 0.90:
+        if box[4] >= 0.85:
             print(f'✨클래스 ID : {int(box[5])} Confidence : {box[4]}')
             class_id = int(box[5])
             if class_id == 3 and SAVE_MODE: 
@@ -296,14 +296,15 @@ def get_info():
             save = []
             save.extend(pos_list) # 각 전차 좌표, 터렛 각도
             save.extend(detected_list) # 탐지된 객체 박스 좌표 (x_min, y_min, x_max, y_max)
-            save.extend([body_x, body_y, body_z])
-            if len(save) == 15:
+            save.extend([body_x, body_y, body_z, p_speed, e_speed])
+            if len(save) == 17:
                 box_data_list.append(save)
             df = pd.DataFrame(box_data_list, columns=['pos_x', 'pos_y', 'pos_z',
                                                'enemy_x', 'enemy_y', 'enemy_z', 
                                                'turret_x', 'turret_y',
                                                'x_min', 'y_min', 'x_max', 'y_max',
-                                               'body_x', 'body_y', 'body_z'])
+                                               'body_x', 'body_y', 'body_z',
+                                               'p_speed', 'e_speed'])
             df.to_csv('box_data.csv', index=False)
             last_bullet_info = {}
             is_detected = False
