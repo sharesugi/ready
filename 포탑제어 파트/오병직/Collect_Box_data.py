@@ -135,12 +135,12 @@ def get_action():
     enemy_y = enemy_pos.get("y", 0)
     enemy_z = enemy_pos.get("z", 0)
 
-    if p_speed < 0.1 and e_speed < 0.1 and time > 2:
+    if p_speed < 0.1 and e_speed < 0.1 and time > 5:
         pos_list = [pos_x, pos_y, pos_z, enemy_x, enemy_y, enemy_z, turret_x, turret_y]
         FIND_MODE = True
         SAVE_MODE = True
 
-    print(f'🛹🛹🛹🛹{p_speed}, {e_speed}, {FIND_MODE}, {SAVE_MODE}')
+    print(f'🛹🛹🛹🛹{p_speed}, {e_speed}, {FIND_MODE}, {SAVE_MODE}, {time}')
     
     player_pos = {"x": pos_x, "y": pos_y, "z": pos_z}
     enemy_pos = {"x": enemy_x, "y": enemy_y, "z": enemy_z}
