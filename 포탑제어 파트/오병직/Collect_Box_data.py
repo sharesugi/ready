@@ -24,11 +24,15 @@ poly = joblib.load(POLY_PATH)
 app = Flask(__name__)
 model_yolo = YOLO('/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/best_8s.pt')
 
+SAVE_MODE = False
+FIND_MODE = False
 is_detected = False
+
+detected_list = []
 
 @app.route('/detect', methods=['POST'])
 def detect():
-    global is_detected
+    global is_detected, detected_list, last_bullet_info, SAVE_MODE
 
     image = request.files.get('image')
     if not image:
@@ -40,7 +44,6 @@ def detect():
     results = model_yolo(image_path)
     detections = results[0].boxes.data.cpu().numpy()
 
-    print(f'########## detections : {detections} #############')
     if detections.size == 0:
         is_detected = False
     else:
@@ -49,9 +52,12 @@ def detect():
     target_classes = {1: "car1", 2: "car2", 3: "tank", 4: "human"}
     filtered_results = []
     for box in detections:
-        if box[4] >= 0.85:
+        if box[4] >= 0.90:
             print(f'✨클래스 ID : {int(box[5])} Confidence : {box[4]}')
             class_id = int(box[5])
+            if class_id == 3 and SAVE_MODE: 
+                detected_list = [box[0], box[1], box[2], box[3]] # x_min, y_min, x_max, y_max
+                last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
             if class_id in target_classes:
                 filtered_results.append({
                     'className': target_classes[class_id],
@@ -101,13 +107,14 @@ def find_angle_for_distance_dy_xgb(distance, dy):
 
     return float(y_pred_angle)
 
-angle_hist = []
+pos_hist = []
 save_time = 0
-len_angle_hist = -1
+len_pos_hist = -1
+pos_list = []
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
-    global enemy_pos, last_bullet_info, is_detected, not_hit_body_data, angle_hist, save_time, len_angle_hist
+    global enemy_pos, last_bullet_info, is_detected, pos_hist, save_time, len_pos_hist, FIND_MODE, pos_list, SAVE_MODE, p_speed, e_speed, time
 
     data = request.get_json(force=True)
 
@@ -123,107 +130,100 @@ def get_action():
     turret_x = turret.get("x", 0)
     turret_y = turret.get("y", 0)
 
-    save_time += 1
-    if save_time > 10:
-        save_time = 0
-        angle_hist.append([round(turret_x, 2), round(turret_y, 2)])
-        len_angle_hist += 1
-
-    print(angle_hist)
-
-    patience = 1 # 3 x n초
-    if len_angle_hist > 3:
-        print(angle_hist[len_angle_hist][:], angle_hist[len_angle_hist - patience][:])
-        if angle_hist[len_angle_hist][:] == angle_hist[len_angle_hist - patience][:]:
-            angle_hist = []
-            len_angle_hist = -1
-            last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
-    
     # 적 위치
     enemy_x = enemy_pos.get("x", 0)
     enemy_y = enemy_pos.get("y", 0)
     enemy_z = enemy_pos.get("z", 0)
 
+    if p_speed < 0.1 and e_speed < 0.1 and time > 2:
+        pos_list = [pos_x, pos_y, pos_z, enemy_x, enemy_y, enemy_z, turret_x, turret_y]
+        FIND_MODE = True
+        SAVE_MODE = True
+
+    print(f'🛹🛹🛹🛹{p_speed}, {e_speed}, {FIND_MODE}, {SAVE_MODE}')
+    
     player_pos = {"x": pos_x, "y": pos_y, "z": pos_z}
     enemy_pos = {"x": enemy_x, "y": enemy_y, "z": enemy_z}
 
-    # 수평 각도 계산
-    target_yaw = get_yaw_angle(player_pos, enemy_pos)
+    if FIND_MODE:
+        # 수평 각도 계산
+        target_yaw = get_yaw_angle(player_pos, enemy_pos)
 
-    # 거리 계산
-    distance = math.sqrt(
-        (pos_x - enemy_x)**2 +
-        (pos_y - enemy_y)**2 +
-        (pos_z - enemy_z)**2
-    )
+        # 거리 계산
+        distance = math.sqrt(
+            (pos_x - enemy_x)**2 +
+            (pos_y - enemy_y)**2 +
+            (pos_z - enemy_z)**2
+        )
 
-    dy = pos_y - enemy_y
+        dy = pos_y - enemy_y
 
-    if distance >= 130:
-        last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+        if distance >= 130:
+            last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
-    if pos_y < 5 or enemy_y < 5:
-        last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+        if pos_y < 5 or enemy_y < 5:
+            last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
-    # y축 (pitch) 각도 보간
-    target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)
-    target_pitch_xgb = find_angle_for_distance_dy_xgb(distance, dy)
-    target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2
+        # y축 (pitch) 각도 보간
+        target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)
+        target_pitch_xgb = find_angle_for_distance_dy_xgb(distance, dy)
+        target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2
 
-    # 현재 터렛 각도와 목표 각도 차이 계산
-    yaw_diff = target_yaw - turret_x
-    pitch_diff = target_pitch - turret_y
+        # 현재 터렛 각도와 목표 각도 차이 계산
+        yaw_diff = target_yaw - turret_x
+        pitch_diff = target_pitch - turret_y
 
-    # 각도 차이 보정 (-180 ~ 180)
-    if yaw_diff > 180:
-        yaw_diff -= 360
-    elif yaw_diff < -180:
-        yaw_diff += 360
+        # 각도 차이 보정 (-180 ~ 180)
+        if yaw_diff > 180:
+            yaw_diff -= 360
+        elif yaw_diff < -180:
+            yaw_diff += 360
 
-    # 최소 가중치 0.01 설정, 최대 1.0 제한
-    def calc_yaw_weight(diff):
-        w = min(max(abs(diff) / 30, 0.01), 1.0)  # 30도 내외로 가중치 조절 예시
-        return w
-    
-    # 최소 가중치 0.1 설정, 최대 1.0 제한
-    def calc_pitch_weight(diff):
-        w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
-        return w
+        # 최소 가중치 0.01 설정, 최대 1.0 제한
+        def calc_yaw_weight(diff):
+            w = min(max(abs(diff) / 30, 0.01), 1.0)  # 30도 내외로 가중치 조절 예시
+            return w
+        
+        # 최소 가중치 0.1 설정, 최대 1.0 제한
+        def calc_pitch_weight(diff):
+            w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
+            return w
 
-    yaw_weight = calc_yaw_weight(yaw_diff)
-    pitch_weight = calc_pitch_weight(pitch_diff)
+        yaw_weight = calc_yaw_weight(yaw_diff)
+        pitch_weight = calc_pitch_weight(pitch_diff)
 
-    # 좌우 회전 명령 결정 (Q: CCW, E: CW)
-    if yaw_diff > 0.1:  # 목표가 오른쪽
-        turretQE_cmd = "E"
-    elif yaw_diff < -0.1:  # 목표가 왼쪽
-        turretQE_cmd = "Q"
+        # 좌우 회전 명령 결정 (Q: CCW, E: CW)
+        if yaw_diff > 0.1:  # 목표가 오른쪽
+            turretQE_cmd = "E"
+        elif yaw_diff < -0.1:  # 목표가 왼쪽
+            turretQE_cmd = "Q"
+        else:
+            turretQE_cmd = ""
+
+        # 상하 포탑 명령 (R: up, F: down)
+        if pitch_diff > 0.1:  # 포탑을 위로 올림
+            turretRF_cmd = "R"
+        elif pitch_diff < -0.1:
+            turretRF_cmd = "F"
+        else:
+            turretRF_cmd = ""
+
+        # 이동은 일단 멈춤
+        command = {
+            "moveWS": {"command": "STOP", "weight": 1.0},
+            "moveAD": {"command": "", "weight": 0.0},
+            "turretQE": {"command": turretQE_cmd, "weight": yaw_weight if turretQE_cmd else 0.0},
+            "turretRF": {"command": turretRF_cmd, "weight": pitch_weight if turretRF_cmd else 0.0},
+            "fire": False
+        }
     else:
-        turretQE_cmd = ""
-
-    # 상하 포탑 명령 (R: up, F: down)
-    if pitch_diff > 0.1:  # 포탑을 위로 올림
-        turretRF_cmd = "R"
-    elif pitch_diff < -0.1:
-        turretRF_cmd = "F"
-    else:
-        turretRF_cmd = ""
-
-    print(f'is_detected : {is_detected}')
-
-    # 조준 완료 판단 (yaw, pitch 오차가 1도 이내일 때)
-    aim_ready = bool(abs(yaw_diff) <= 0.1 and abs(pitch_diff) <= 0.1 and is_detected)
-    print(target_yaw, target_pitch)
-    print(aim_ready)
-
-    # 이동은 일단 멈춤
-    command = {
-        "moveWS": {"command": "STOP", "weight": 1.0},
-        "moveAD": {"command": "", "weight": 0.0},
-        "turretQE": {"command": turretQE_cmd, "weight": yaw_weight if turretQE_cmd else 0.0},
-        "turretRF": {"command": turretRF_cmd, "weight": pitch_weight if turretRF_cmd else 0.0},
-        "fire": aim_ready
-    }
+        command = {
+            "moveWS": {"command": "STOP", "weight": 1.0},
+            "moveAD": {"command": "", "weight": 0.0},
+            "turretQE": {"command": "", "weight": 0.0},
+            "turretRF": {"command": "", "weight": 0.0},
+            "fire": False
+        }
 
     print("🔁 Sent Combined Action:", command)
     return jsonify(command)
@@ -239,13 +239,14 @@ def update_bullet():
     return jsonify({"result": "ok"})
 
 enemy_pos = {}
-true_hit_ratio = []
-not_hit_body_data = []
 time = 0
+box_data_list = []
+p_speed = 10
+e_speed = 10
 
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
-    global last_bullet_info, true_hit_ratio, not_hit_body_data, is_detected, time
+    global last_bullet_info, is_detected, time, FIND_MODE, detected_list, pos_list, box_data_list, SAVE_MODE, p_speed, e_speed
 
     data = request.get_json()
     enemy_position = data.get('enemyPos', {})
@@ -253,6 +254,8 @@ def get_info():
     enemy_pos['y'] = enemy_position.get('y', 0)
     enemy_pos['z'] = enemy_position.get('z', 0)
     time = data.get("time", 0)
+    p_speed = data.get('playerSpeed', 0)
+    e_speed = data.get('enemySpeed', 0)
     body_x = data.get('playerBodyX', 0)
     body_y = data.get('playerBodyY', 0)
     body_z = data.get('playerBodyZ', 0)
@@ -287,6 +290,26 @@ def get_info():
             # df = pd.DataFrame(true_hit_ratio, columns=["is_hit"])
             # df.to_csv("true_hit_ratio_map5_DNN_4500.csv", index=False)
             last_bullet_info = {}
+
+        if is_detected and SAVE_MODE:
+            print("🌀 전차 감지 ! 데이터 저장 ! 초기화 !")
+            save = []
+            save.extend(pos_list) # 각 전차 좌표, 터렛 각도
+            save.extend(detected_list) # 탐지된 객체 박스 좌표 (x_min, y_min, x_max, y_max)
+            save.extend([body_x, body_y, body_z])
+            if len(save) == 15:
+                box_data_list.append(save)
+            df = pd.DataFrame(box_data_list, columns=['pos_x', 'pos_y', 'pos_z',
+                                               'enemy_x', 'enemy_y', 'enemy_z', 
+                                               'turret_x', 'turret_y',
+                                               'x_min', 'y_min', 'x_max', 'y_max',
+                                               'body_x', 'body_y', 'body_z'])
+            df.to_csv('box_data.csv', index=False)
+            last_bullet_info = {}
+            is_detected = False
+            FIND_MODE = False
+            SAVE_MODE = False
+            control = "reset"
         else:
             control = "reset"
             last_bullet_info = {}
@@ -297,54 +320,15 @@ def get_info():
         "control": control,
     })
 
-@app.route('/set_destination', methods=['POST'])
-def set_destination():
-    data = request.get_json()
-    if not data or "destination" not in data:
-        return jsonify({"status": "ERROR", "message": "Missing destination data"}), 400
-
-    try:
-        x, y, z = map(float, data["destination"].split(","))
-        print(f"🎯 Destination set to: x={x}, y={y}, z={z}")
-        return jsonify({"status": "OK", "destination": {"x": x, "y": y, "z": z}})
-    except Exception as e:
-        return jsonify({"status": "ERROR", "message": f"Invalid format: {str(e)}"}), 400
-
-@app.route('/update_obstacle', methods=['POST'])
-def update_obstacle():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data received'}), 400
-
-    print("🪨 Obstacle Data:", data)
-    return jsonify({'status': 'success', 'message': 'Obstacle data received'})
-
-@app.route('/collision', methods=['POST']) 
-def collision():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No collision data received'}), 400
-
-    object_name = data.get('objectName')
-    position = data.get('position', {})
-    x = position.get('x')
-    y = position.get('y')
-    z = position.get('z')
-
-    print(f"💥 Collision Detected - Object: {object_name}, Position: ({x}, {y}, {z})")
-
-    return jsonify({'status': 'success', 'message': 'Collision data received'})
-
-#Endpoint called when the episode starts
 @app.route('/init', methods=['GET'])
 def init():
     print("🛠️ /init 라우트 진입 확인!")
 
     blStartX = random.uniform(10, 290)
-    blStartY = 20
+    blStartY = 40
     blStartZ = random.uniform(10, 290)
     rlStartX = random.uniform(10, 290)
-    rlStartY = 20
+    rlStartY = 40
     rlStartZ = random.uniform(10, 290)
 
     config = {
@@ -374,4 +358,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5011, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5003, debug=False, use_reloader=False)
