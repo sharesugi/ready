@@ -12,6 +12,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import joblib
 from tensorflow.keras.models import load_model
+from sort.tracker import SortTracker
+
+tracker = SortTracker(
+max_age=5,
+min_hits=1,
+iou_threshold=0.3)
 
 IMAGE_WIDTH = 1921
 IMAGE_HEIGHT = 1080
@@ -37,7 +43,7 @@ model_yolo = YOLO('/root/jupyter_home/tank_project/ready/포탑제어 파트/오
 FIND_MODE = True
 is_detected = False
 
-def get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_horizontal, fov_vertical, lidar_rotation):
+def get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_horizontal, fov_vertical):
     # 중심 좌표
     x_center = (bbox["x1"] + bbox["x2"]) / 2
     y_center = (bbox["y1"] + bbox["y2"]) / 2
@@ -50,42 +56,97 @@ def get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_horizontal, f
     h_angle = (x_norm - 0.5) * fov_horizontal
     v_angle = (0.5 - y_norm) * fov_vertical  # y축은 반대로 계산 (위가 0)
 
-    # ▶ 시야 보정: LiDAR 시야 회전값 더해주기 (yaw / pitch 보정)
-    # h_angle += lidar_rotation.get("x", 0.0)  # yaw
-    # v_angle += lidar_rotation.get("y", 0.0)  # pitch
-    
     return h_angle, v_angle
 
-def find_lidar_cluster_center(lidar_points, h_angle, v_angle, h_angle_tolerance=5, v_angle_tolerance=3):
-    # 1. 각도 기준으로 후보 필터링 (isDetected == True)
+# def find_lidar_cluster_center(lidar_points, h_angle, v_angle, h_angle_tolerance=5, v_angle_tolerance=1.5):
+#     # 1. 각도 기준으로 후보 필터링 (isDetected == True)
+#     candidates = [
+#         p for p in lidar_points
+#         if p["isDetected"]
+#         and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tolerance
+#         and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tolerance
+#     ]
+
+#     if not candidates:
+#         return None
+
+#     # 2. 중심 좌표 계산
+#     avg_x = sum(p["position"]["x"] for p in candidates) / len(candidates)
+#     avg_y = sum(p["position"]["y"] for p in candidates) / len(candidates)
+#     avg_z = sum(p["position"]["z"] for p in candidates) / len(candidates)
+
+#     # 3. 가장 가까운 점 기준으로 거리 추정 (optional)
+#     dist = sum(p["distance"] for p in candidates) / len(candidates)
+
+#     return {
+#         "position": {"x": avg_x, "y": avg_y, "z": avg_z},
+#         "distance": dist
+#     }
+
+# def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v, lidar_rotation):
+#     results = []
+#     for bbox in bboxes:
+#         h_angle, v_angle = get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_h, fov_v, lidar_rotation)
+#         cluster = find_lidar_cluster_center(lidar_points, h_angle, v_angle)
+#         if cluster:
+#             results.append({
+#                 "bbox": bbox,
+#                 "matched_lidar_pos": cluster["position"],
+#                 "distance": cluster["distance"]
+#             })
+#     return results
+
+def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
+                                       bbox_width_ratio, bbox_height_ratio,
+                                       fov_horizontal=47.81061,
+                                       fov_vertical=28.0,
+                                       lidar_origin_y=8.0,
+                                       height_thresh=1.0):
+    # 바운딩박스 크기에 따라 허용 각도 조정
+    h_angle_tol = bbox_width_ratio * fov_horizontal
+    v_angle_tol = bbox_height_ratio * fov_vertical
+
     candidates = [
         p for p in lidar_points
         if p["isDetected"]
-        and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tolerance
-        and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tolerance
+        and (p["position"]["y"] - lidar_origin_y) > height_thresh
+        and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tol
+        and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tol
     ]
 
     if not candidates:
         return None
 
-    # 2. 중심 좌표 계산
+    # 평균 좌표 및 거리
     avg_x = sum(p["position"]["x"] for p in candidates) / len(candidates)
-    avg_y = sum(p["position"]["y"] for p in candidates) / len(candidates)
+    avg_y = (sum(p["position"]["y"] for p in candidates) / len(candidates)) - 1
     avg_z = sum(p["position"]["z"] for p in candidates) / len(candidates)
-
-    # 3. 가장 가까운 점 기준으로 거리 추정 (optional)
-    dist = sum(p["distance"] for p in candidates) / len(candidates)
+    avg_dist = sum(p["distance"] for p in candidates) / len(candidates)
 
     return {
         "position": {"x": avg_x, "y": avg_y, "z": avg_z},
-        "distance": dist
+        "distance": avg_dist
     }
 
-def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v, lidar_rotation):
+def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v):
     results = []
     for bbox in bboxes:
-        h_angle, v_angle = get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_h, fov_v, lidar_rotation)
-        cluster = find_lidar_cluster_center(lidar_points, h_angle, v_angle)
+        h_angle, v_angle = get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_h, fov_v)
+
+        # 바운딩박스 비율 계산
+        bbox_width_ratio = (bbox["x2"] - bbox["x1"]) / image_width
+        bbox_height_ratio = (bbox["y2"] - bbox["y1"]) / image_height
+
+        # LiDAR 클러스터 추정
+        cluster = find_lidar_cluster_center_adaptive(
+            lidar_points, h_angle, v_angle,
+            bbox_width_ratio, bbox_height_ratio,
+            fov_horizontal=fov_h,
+            fov_vertical=fov_v,
+            lidar_origin_y=8.0,
+            height_thresh=1.0
+        )
+
         if cluster:
             results.append({
                 "bbox": bbox,
@@ -127,7 +188,7 @@ def detect():
                     'confidence': float(box[4]),
                     'color': '#00FF00',
                     'filled': False,
-                    'updateBoxWhileMoving': False
+                    'updateBoxWhileMoving': True
                 })
 
     results = match_yolo_to_lidar(
@@ -136,8 +197,7 @@ def detect():
         image_width=IMAGE_WIDTH,
         image_height=IMAGE_HEIGHT,
         fov_h=FOV_HORIZONTAL,
-        fov_v=FOV_VERTICAL,
-        lidar_rotation=lidar_rotation
+        fov_v=FOV_VERTICAL
     )
 
     if results:
@@ -219,7 +279,7 @@ def get_action():
     print(FIND_MODE)
 
     if FIND_MODE:
-        if start_distance >= 105 or start_distance <= 20:
+        if start_distance >= 130 or start_distance <= 20:
             last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
         command = {
@@ -498,4 +558,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5009, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
