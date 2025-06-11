@@ -12,12 +12,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import joblib
 from tensorflow.keras.models import load_model
-from sort.tracker import SortTracker
-
-tracker = SortTracker(
-max_age=5,
-min_hits=1,
-iou_threshold=0.3)
 
 IMAGE_WIDTH = 1921
 IMAGE_HEIGHT = 1080
@@ -41,7 +35,6 @@ app = Flask(__name__)
 model_yolo = YOLO('/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/best_8s.pt')
 
 FIND_MODE = True
-is_detected = False
 
 def get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_horizontal, fov_vertical):
     # 중심 좌표
@@ -58,50 +51,10 @@ def get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_horizontal, f
 
     return h_angle, v_angle
 
-# def find_lidar_cluster_center(lidar_points, h_angle, v_angle, h_angle_tolerance=5, v_angle_tolerance=1.5):
-#     # 1. 각도 기준으로 후보 필터링 (isDetected == True)
-#     candidates = [
-#         p for p in lidar_points
-#         if p["isDetected"]
-#         and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tolerance
-#         and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tolerance
-#     ]
-
-#     if not candidates:
-#         return None
-
-#     # 2. 중심 좌표 계산
-#     avg_x = sum(p["position"]["x"] for p in candidates) / len(candidates)
-#     avg_y = sum(p["position"]["y"] for p in candidates) / len(candidates)
-#     avg_z = sum(p["position"]["z"] for p in candidates) / len(candidates)
-
-#     # 3. 가장 가까운 점 기준으로 거리 추정 (optional)
-#     dist = sum(p["distance"] for p in candidates) / len(candidates)
-
-#     return {
-#         "position": {"x": avg_x, "y": avg_y, "z": avg_z},
-#         "distance": dist
-#     }
-
-# def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v, lidar_rotation):
-#     results = []
-#     for bbox in bboxes:
-#         h_angle, v_angle = get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_h, fov_v, lidar_rotation)
-#         cluster = find_lidar_cluster_center(lidar_points, h_angle, v_angle)
-#         if cluster:
-#             results.append({
-#                 "bbox": bbox,
-#                 "matched_lidar_pos": cluster["position"],
-#                 "distance": cluster["distance"]
-#             })
-#     return results
-
 def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
                                        bbox_width_ratio, bbox_height_ratio,
                                        fov_horizontal=47.81061,
-                                       fov_vertical=28.0,
-                                       lidar_origin_y=8.0,
-                                       height_thresh=1.0):
+                                       fov_vertical=28.0):
     # 바운딩박스 크기에 따라 허용 각도 조정
     h_angle_tol = bbox_width_ratio * fov_horizontal
     v_angle_tol = bbox_height_ratio * fov_vertical
@@ -109,12 +62,12 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
     candidates = [
         p for p in lidar_points
         if p["isDetected"]
-        and (p["position"]["y"] - lidar_origin_y) > height_thresh
         and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tol
         and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tol
     ]
 
     if not candidates:
+        print(f'❌ There is no candidates')
         return None
 
     # 평균 좌표 및 거리
@@ -142,9 +95,7 @@ def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, 
             lidar_points, h_angle, v_angle,
             bbox_width_ratio, bbox_height_ratio,
             fov_horizontal=fov_h,
-            fov_vertical=fov_v,
-            lidar_origin_y=8.0,
-            height_thresh=1.0
+            fov_vertical=fov_v
         )
 
         if cluster:
@@ -160,7 +111,7 @@ lidar_rotation = {}
 
 @app.route('/detect', methods=['POST'])
 def detect():
-    global is_detected, lidar_data, lidar_rotation, enemy_pos, FIND_MODE
+    global lidar_data, lidar_rotation, enemy_pos, FIND_MODE, yolo_results
 
     image = request.files.get('image')
     if not image:
@@ -179,6 +130,7 @@ def detect():
         if box[4] >= 0.85:
             class_id = int(box[5])
             if class_id == 3:
+                FIND_MODE = False
                 current_bboxes.append({'x1': float(box[0]), 'y1': float(box[1]), 'x2': float(box[2]), 'y2': float(box[3])})
 
             if class_id in target_classes:
@@ -191,21 +143,19 @@ def detect():
                     'updateBoxWhileMoving': True
                 })
 
-    results = match_yolo_to_lidar(
+    yolo_results = match_yolo_to_lidar(
         bboxes=current_bboxes,
         lidar_points=lidar_data,
         image_width=IMAGE_WIDTH,
         image_height=IMAGE_HEIGHT,
         fov_h=FOV_HORIZONTAL,
         fov_v=FOV_VERTICAL
-    )
+    )   
 
-    if results:
-        FIND_MODE = False
-        is_detected = True
+    print(f'🗺️ yolo_results : {yolo_results}')
 
     # 결과 확인
-    for i, r in enumerate(results):
+    for i, r in enumerate(yolo_results):
         enemy_pos['x'] = r['matched_lidar_pos'].get('x', 0)
         enemy_pos['y'] = r['matched_lidar_pos'].get('y', 0)
         enemy_pos['z'] = r['matched_lidar_pos'].get('z', 0)
@@ -260,7 +210,7 @@ len_angle_hist = -1
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
-    global enemy_pos, last_bullet_info, is_detected, not_hit_body_data, angle_hist, save_time, len_angle_hist, FIND_MODE, start_distance
+    global enemy_pos, last_bullet_info, angle_hist, save_time, len_angle_hist, FIND_MODE, start_distance, yolo_results
 
     data = request.get_json(force=True)
 
@@ -276,7 +226,7 @@ def get_action():
     turret_x = turret.get("x", 0)
     turret_y = turret.get("y", 0)
 
-    print(FIND_MODE)
+    print(f'🗺️ FIND_MODE : {FIND_MODE}')
 
     if FIND_MODE:
         if start_distance >= 130 or start_distance <= 20:
@@ -285,115 +235,119 @@ def get_action():
         command = {
             "moveWS": {"command": "STOP", "weight": 1.0},
             "moveAD": {"command": "", "weight": 0.0},
-            "turretQE": {"command": "Q", "weight": 0.5},
+            "turretQE": {"command": "Q", "weight": 1.0},
             "turretRF": {"command": "turretRF_cmd", "weight": 0.0},
             "fire": False
         }
     else:
-        save_time += 1
-        if save_time > 10:
-            save_time = 0
-            angle_hist.append([round(turret_x, 2), round(turret_y, 2)])
-            len_angle_hist += 1
-
-        print(angle_hist)
-
-        patience = 1 # 3 x n초
-        if len_angle_hist > 3:
-            print(angle_hist[len_angle_hist][:], angle_hist[len_angle_hist - patience][:])
-            if angle_hist[len_angle_hist][:] == angle_hist[len_angle_hist - patience][:]:
-                angle_hist = []
-                len_angle_hist = -1
-                last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
-        
-        # 적 위치
-        enemy_x = enemy_pos.get("x", 0)
-        enemy_y = enemy_pos.get("y", 0)
-        enemy_z = enemy_pos.get("z", 0)
-
-        player_pos = {"x": pos_x, "y": pos_y, "z": pos_z}
-        enemy_pos = {"x": enemy_x, "y": enemy_y, "z": enemy_z}
-
-        # 수평 각도 계산
-        target_yaw = get_yaw_angle(player_pos, enemy_pos)
-
-        # 거리 계산
-        distance = math.sqrt(
-            (pos_x - enemy_x)**2 +
-            (pos_y - enemy_y)**2 +
-            (pos_z - enemy_z)**2
-        )
-
-        # distance += distance * 0.03
-
-        print(f'❌❌❌❌ 거리 오차 {distance - start_distance}')
-
-        dy = pos_y - enemy_y
-
-        if pos_y < 5 or enemy_y < 5:
-            last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
-
-        # y축 (pitch) 각도 보간
-        target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)
-        target_pitch_xgb = find_angle_for_distance_dy_xgb(distance, dy)
-        target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2
-
-        # 현재 터렛 각도와 목표 각도 차이 계산
-        yaw_diff = target_yaw - turret_x
-        pitch_diff = target_pitch - turret_y
-
-        # 각도 차이 보정 (-180 ~ 180)
-        if yaw_diff > 180:
-            yaw_diff -= 360
-        elif yaw_diff < -180:
-            yaw_diff += 360
-
-        # 최소 가중치 0.01 설정, 최대 1.0 제한
-        def calc_yaw_weight(diff):
-            w = min(max(abs(diff) / 30, 0.01), 1.0)  # 30도 내외로 가중치 조절 예시
-            return w
-        
-        # 최소 가중치 0.1 설정, 최대 1.0 제한
-        def calc_pitch_weight(diff):
-            w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
-            return w
-
-        yaw_weight = calc_yaw_weight(yaw_diff)
-        pitch_weight = calc_pitch_weight(pitch_diff)
-
-        # 좌우 회전 명령 결정 (Q: CCW, E: CW)
-        if yaw_diff > 0.1:  # 목표가 오른쪽
-            turretQE_cmd = "E"
-        elif yaw_diff < -0.1:  # 목표가 왼쪽
-            turretQE_cmd = "Q"
-        else:
-            turretQE_cmd = ""
-
-        # 상하 포탑 명령 (R: up, F: down)
-        if pitch_diff > 0.1:  # 포탑을 위로 올림
-            turretRF_cmd = "R"
-        elif pitch_diff < -0.1:
-            turretRF_cmd = "F"
-        else:
-            turretRF_cmd = ""
-
-        print(f'is_detected : {is_detected}')
-
-        # 조준 완료 판단 (yaw, pitch 오차가 1도 이내일 때)
-        aim_ready = bool(abs(yaw_diff) <= 0.1 and abs(pitch_diff) <= 0.1 and is_detected)
-        print(target_yaw, target_pitch)
-        print(aim_ready)
-
-        # 이동은 일단 멈춤
-        command = {
-            "moveWS": {"command": "STOP", "weight": 1.0},
-            "moveAD": {"command": "", "weight": 0.0},
-            "turretQE": {"command": turretQE_cmd, "weight": yaw_weight if turretQE_cmd else 0.0},
-            "turretRF": {"command": turretRF_cmd, "weight": pitch_weight if turretRF_cmd else 0.0},
-            "fire": aim_ready
+        if not yolo_results:
+            command = {
+                "moveWS": {"command": "STOP", "weight": 1.0},
+                "moveAD": {"command": "", "weight": 0.0},
+                "turretQE": {"command": "", "weight": 0.0},
+                "turretRF": {"command": "turretRF_cmd", "weight": 0.0},
+                "fire": False
         }
+        else:
+            save_time += 1
+            if save_time > 10:
+                save_time = 0
+                angle_hist.append([round(turret_x, 2), round(turret_y, 2)])
+                len_angle_hist += 1
 
-    print("🔁 Sent Combined Action:", command)
+            print(angle_hist)
+
+            patience = 1 # 3 x n초
+            if len_angle_hist > 3:
+                if angle_hist[len_angle_hist][:] == angle_hist[len_angle_hist - patience][:]:
+                    angle_hist = []
+                    len_angle_hist = -1
+                    last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+            
+            # 적 위치
+            enemy_x = enemy_pos.get("x", 0)
+            enemy_y = enemy_pos.get("y", 0)
+            enemy_z = enemy_pos.get("z", 0)
+
+            player_pos = {"x": pos_x, "y": pos_y, "z": pos_z}
+            enemy_pos = {"x": enemy_x, "y": enemy_y, "z": enemy_z}
+
+            # 수평 각도 계산
+            target_yaw = get_yaw_angle(player_pos, enemy_pos)
+
+            # 거리 계산
+            distance = math.sqrt(
+                (pos_x - enemy_x)**2 +
+                (pos_y - enemy_y)**2 +
+                (pos_z - enemy_z)**2
+            )
+
+            # distance += distance * 0.03
+
+            print(f'❌❌❌❌ 거리 오차 {distance - start_distance}')
+
+            dy = pos_y - enemy_y
+
+            if pos_y < 5 or enemy_y < 5:
+                last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+
+            # y축 (pitch) 각도 보간
+            target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)
+            target_pitch_xgb = find_angle_for_distance_dy_xgb(distance, dy)
+            target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2
+
+            # 현재 터렛 각도와 목표 각도 차이 계산
+            yaw_diff = target_yaw - turret_x
+            pitch_diff = target_pitch - turret_y
+
+            # 각도 차이 보정 (-180 ~ 180)
+            if yaw_diff > 180:
+                yaw_diff -= 360
+            elif yaw_diff < -180:
+                yaw_diff += 360
+
+            # 최소 가중치 0.01 설정, 최대 1.0 제한
+            def calc_yaw_weight(diff):
+                w = min(max(abs(diff) / 30, 0.01), 1.0)  # 30도 내외로 가중치 조절 예시
+                return w
+            
+            # 최소 가중치 0.1 설정, 최대 1.0 제한
+            def calc_pitch_weight(diff):
+                w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
+                return w
+
+            yaw_weight = calc_yaw_weight(yaw_diff)
+            pitch_weight = calc_pitch_weight(pitch_diff)
+
+            # 좌우 회전 명령 결정 (Q: CCW, E: CW)
+            if yaw_diff > 0.1:  # 목표가 오른쪽
+                turretQE_cmd = "E"
+            elif yaw_diff < -0.1:  # 목표가 왼쪽
+                turretQE_cmd = "Q"
+            else:
+                turretQE_cmd = ""
+
+            # 상하 포탑 명령 (R: up, F: down)
+            if pitch_diff > 0.1:  # 포탑을 위로 올림
+                turretRF_cmd = "R"
+            elif pitch_diff < -0.1:
+                turretRF_cmd = "F"
+            else:
+                turretRF_cmd = ""
+
+            # 조준 완료 판단 (yaw, pitch 오차가 1도 이내일 때)
+            aim_ready = bool(abs(yaw_diff) <= 0.1 and abs(pitch_diff) <= 0.1)
+            print(target_yaw, target_pitch)
+
+            # 이동은 일단 멈춤
+            command = {
+                "moveWS": {"command": "STOP", "weight": 1.0},
+                "moveAD": {"command": "", "weight": 0.0},
+                "turretQE": {"command": turretQE_cmd, "weight": yaw_weight if turretQE_cmd else 0.0},
+                "turretRF": {"command": turretRF_cmd, "weight": pitch_weight if turretRF_cmd else 0.0},
+                "fire": aim_ready
+            }
+
     return jsonify(command)
 
 # 전역 상태 저장
@@ -404,32 +358,27 @@ def update_bullet():
     global last_bullet_info
     last_bullet_info = request.get_json()
     print("💥 탄 정보 갱신됨:", last_bullet_info)
-    return jsonify({"result": "ok"})
+    return jsonify({"yolo_results": "ok"})
 
 enemy_pos = {}
 true_hit_ratio = []
-not_hit_body_data = []
 time = 0
 
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
-    global last_bullet_info, true_hit_ratio, not_hit_body_data, is_detected, time, lidar_data, lidar_rotation, FIND_MODE, enemy_pos
+    global last_bullet_info, true_hit_ratio, time, lidar_data, lidar_rotation, FIND_MODE, enemy_pos
 
     data = request.get_json()
     lidar_data = data.get('lidarPoints', [])
     lidar_rotation = data.get('lidarRotation', {})
     time = data.get("time", 0)
-    body_x = data.get('playerBodyX', 0)
-    body_y = data.get('playerBodyY', 0)
-    body_z = data.get('playerBodyZ', 0)
+    # body_x = data.get('playerBodyX', 0)
+    # body_y = data.get('playerBodyY', 0)
+    # body_z = data.get('playerBodyZ', 0)
     control = ""
-
-    # not_hit_body_data = [body_x, body_y, body_z]
-    print(f'Body : {body_x, body_y, body_z}')
 
     if time > 45:
         control = 'reset'
-        is_detected = False
         FIND_MODE = True
         last_bullet_info = {}
         enemy_pos = {}
@@ -437,32 +386,25 @@ def get_info():
     if last_bullet_info:
         if last_bullet_info.get("hit") == "terrain":
             print("🌀 탄이 지형에 명중! 전차를 초기화합니다.")
-            is_detected = False
             FIND_MODE = True
             control = "reset"
-            true_hit_ratio.append(0)
-            df = pd.DataFrame(true_hit_ratio, columns=["is_hit"])
-            df.to_csv("true_hit_ratio_map2_YOLO.csv", index=False)
-
-            # not_hit_body_data.append([body_x, body_y, body_z])
-            # df = pd.DataFrame(not_hit_body_data, columns=["body_x", "body_y", "body_z"])
-            # df.to_csv("not_hit_body_data.csv", index=False)
+            # true_hit_ratio.append(0)
+            # df = pd.DataFrame(true_hit_ratio, columns=["is_hit"])
+            # df.to_csv("true_hit_ratio_map5_YOLO.csv", index=False)
             last_bullet_info = {}
             enemy_pos = {}
 
         if last_bullet_info.get("hit") == "enemy":
             print("🌀 탄이 적 전차에 명중! 전차를 초기화합니다.")
-            is_detected = False
             FIND_MODE = True
             control = "reset"
-            true_hit_ratio.append(1)
-            df = pd.DataFrame(true_hit_ratio, columns=["is_hit"])
-            df.to_csv("true_hit_ratio_map2_YOLO.csv", index=False)
+            # true_hit_ratio.append(1)
+            # df = pd.DataFrame(true_hit_ratio, columns=["is_hit"])
+            # df.to_csv("true_hit_ratio_map5_YOLO.csv", index=False)
             last_bullet_info = {}
             enemy_pos = {}
         else:
             control = "reset"
-            is_detected = False
             FIND_MODE = True
             last_bullet_info = {}
             enemy_pos = {}
@@ -514,7 +456,11 @@ def collision():
 #Endpoint called when the episode starts
 @app.route('/init', methods=['GET'])
 def init():
-    global start_distance
+    global start_distance, FIND_MODE, last_bullet_info, enemy_pos
+
+    FIND_MODE = True
+    last_bullet_info = {}
+    enemy_pos = {}
 
     print("🛠️ /init 라우트 진입 확인!")
 
