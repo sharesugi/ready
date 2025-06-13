@@ -1,4 +1,14 @@
 코드를 직접 돌려보고 싶으면 0602.py 파일을 사용!
+### 0613
+- lidar에서 x,z 값 실시간으로 받아서 장애물 감지
+- 라이더 설정은 이렇게
+![image.png](attachment:5c2adc54-6f0a-49b6-9324-1bbff1795354:image.png)  
+- split_by_distance: 거리 기반으로 좌표 값 계산해서 가까운 것끼리 한 객체로 묶음.  
+![image](https://github.com/user-attachments/assets/8204b0e1-fd75-49b6-8519-693b2bc32283)  
+- detect_obstacle_and_hill: 각도 계산을 해서 언덕과 장애물 구분 함수  
+- map_obstacle: 감지한 장애물을 맵에 반영  
+
+- 작은 벽을 인식을 못해서 데이터 값이 작더라도 직선이면 인식하도록 바꿈.  
 
 [희연 코드]  
 - path2: 2번 이동후 path 재계산하는 기능
