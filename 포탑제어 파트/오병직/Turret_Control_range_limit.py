@@ -12,7 +12,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import joblib
 from tensorflow.keras.models import load_model
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
+last_bbox = None
 # 화면 해상도 (스크린샷 찍었을 때 이미지 크기)
 IMAGE_WIDTH = 1921
 IMAGE_HEIGHT = 1080
@@ -64,22 +68,29 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
     h_angle_tol = bbox_width_ratio * fov_horizontal
     v_angle_tol = bbox_height_ratio * fov_vertical
 
-    # 전체 라이다 데이터에서 박스안에 해당하는 라이다 포인트만 저장
-    candidates = [
-        p for p in lidar_points
-        if p["isDetected"]
-        and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tol
-        and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tol
-    ]
+    # verticalAngle 미지원 시 수직 필터링 제거
+    if not any('verticalAngle' in p for p in lidar_points):
+        candidates = [
+            p for p in lidar_points
+            if p["isDetected"]
+            and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tol
+        ]
+        print(f'🔍 Using horizontal angle only: {h_angle}, tolerance: {h_angle_tol}')
+    else:
+        candidates = [
+            p for p in lidar_points
+            if p["isDetected"]
+            and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tol
+            and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tol
+        ]
 
     # 박스가 그려진 각도에 라이다 값이 없다면 (여기가 문제. 라이다 데이터를 촘촘하게 받지 않으면 못찾음.)
     if not candidates:
         print(f'❌ There is no candidates')
         return None
-
-    # 바운딩 박스 안에 찍힌 라이다 포인트들의 평균 좌표 및 거리
+    
     avg_x = sum(p["position"]["x"] for p in candidates) / len(candidates)
-    avg_y = (sum(p["position"]["y"] for p in candidates) / len(candidates)) - 1
+    avg_y = sum(p["position"]["y"] for p in candidates) / len(candidates) - 1
     avg_z = sum(p["position"]["z"] for p in candidates) / len(candidates)
     avg_dist = sum(p["distance"] for p in candidates) / len(candidates)
 
@@ -87,6 +98,39 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
         "position": {"x": avg_x, "y": avg_y, "z": avg_z},
         "distance": avg_dist
     }
+    
+def find_lidar_cluster_with_fallback(lidar_points, h_angle, v_angle,
+                                     bbox_width_ratio, bbox_height_ratio,
+                                     fov_horizontal=47.81061,
+                                     fov_vertical=28.0):
+    factors = [1.0, 1.5, 2.0, 3.0, 5.0, 10.0]        # 허용폭 1× → 1.5× → 2× → 3×
+    for f in factors:
+        cluster = find_lidar_cluster_center_adaptive(
+            lidar_points, h_angle, v_angle,
+            bbox_width_ratio, bbox_height_ratio,
+            fov_horizontal=fov_horizontal * f,
+            fov_vertical=fov_vertical * f
+        )
+        print(f'🔍 Trying factor {f}: {cluster}')
+        if cluster:
+            return cluster
+
+    # 폴백: 각도 차이가 최소인 포인트 하나 선택
+    best = min(
+        (p for p in lidar_points if p.get("isDetected")),
+        key=lambda p: abs((p["angle"] - h_angle + 180) % 360 - 180),
+        default=None
+    )
+    if best:
+        return {
+            "position": {
+                "x": best["position"]["x"],
+                "y": best["position"]["y"] - 1,
+                "z": best["position"]["z"]
+            },
+            "distance": best["distance"]
+        }
+    return None
 
 # 위 두 함수를 사용하여 우리가 필요한 실제 감지된 전차의 좌표를 return 해주는 함수
 def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v):
@@ -99,7 +143,14 @@ def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, 
         bbox_height_ratio = (bbox["y2"] - bbox["y1"]) / image_height
 
         # LiDAR 클러스터 추정
-        cluster = find_lidar_cluster_center_adaptive(
+        # cluster = find_lidar_cluster_center_adaptive(
+        #     lidar_points, h_angle, v_angle,
+        #     bbox_width_ratio, bbox_height_ratio,
+        #     fov_horizontal=fov_h,
+        #     fov_vertical=fov_v
+        # )
+
+        cluster = find_lidar_cluster_with_fallback(
             lidar_points, h_angle, v_angle,
             bbox_width_ratio, bbox_height_ratio,
             fov_horizontal=fov_h,
@@ -118,7 +169,7 @@ lidar_data = [] # /info 에서 가져오는 라이다 데이터 저장
 
 @app.route('/detect', methods=['POST'])
 def detect():
-    global lidar_data, enemy_pos, FIND_MODE, yolo_results
+    global lidar_data, enemy_pos, FIND_MODE, yolo_results, last_bbox  
 
     image = request.files.get('image')
     if not image:
@@ -130,7 +181,7 @@ def detect():
     results = model_yolo(image_path)
     detections = results[0].boxes.data.cpu().numpy()
 
-    target_classes = {0: "car1", 1: "car2", 2: "human", 3: "tank"}
+    target_classes = {1: "car1", 2: "car2", 3: "tank", 4: "human"}
     filtered_results = []
     current_bboxes = [] # 인식된 전차의 바운딩 박스 좌표를 저장하기 위한 리스트
     for box in detections:
@@ -149,6 +200,14 @@ def detect():
                     'filled': False,
                     'updateBoxWhileMoving': True
                 })
+
+    # **Fallback**: YOLO가 못 잡으면 이전 last_bbox 사용
+    if not current_bboxes and last_bbox is not None:
+        current_bboxes = [last_bbox]
+        print("⚠️ YOLO miss → using last_bbox:", last_bbox)
+    # 성공적으로 잡았으면 last_bbox 업데이트
+    elif current_bboxes:
+        last_bbox = current_bboxes[-1]
 
     # current_bboxes에 저장되어있는 현재 인식된 전차들의 바운딩 박스 좌표로 그 전차의 실제 좌표값 가져오기
     yolo_results = match_yolo_to_lidar(
@@ -247,7 +306,7 @@ def get_action():
 
     if FIND_MODE: # 적 전차를 탐색하는 상태일 때
         # 처음 시작되고 적 전차와 내 전차의 거리가 20 이하 110 이상이면 reset
-        if start_distance >= 80 or start_distance <= 20:
+        if start_distance >= 110 or start_distance <= 20:
             # last_bullet_info에 데이터가 들어가면 reset됨
             last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
@@ -255,7 +314,7 @@ def get_action():
         command = {
             "moveWS": {"command": "STOP", "weight": 1.0},
             "moveAD": {"command": "", "weight": 0.0},
-            "turretQE": {"command": "Q", "weight": 1.0},
+            "turretQE": {"command": "Q", "weight": 0.8},
             "turretRF": {"command": "turretRF_cmd", "weight": 0.0},
             "fire": False
         }
@@ -269,7 +328,7 @@ def get_action():
                 "fire": False
         }
         else: # 인식도 됐고, 그에 해당하는 라이다 포인트도 있다면
-            # 아래 273~284번 줄은 조준 가능한 각도인지 판단하고, 조준불가능한 각도라면 reset하는 코드
+            # 아래 
             save_time += 1
             if save_time > 10:
                 save_time = 0
@@ -294,7 +353,7 @@ def get_action():
             # 수평 각도 계산
             target_yaw = get_yaw_angle(player_pos, enemy_pos)
 
-            # 모델 입력을 위한 거리 계산
+            # 거리 계산
             distance = math.sqrt(
                 (pos_x - enemy_x)**2 +
                 (pos_y - enemy_y)**2 +
@@ -303,17 +362,15 @@ def get_action():
 
             print(f'❌❌❌❌ 거리 오차 {distance - start_distance}')
 
-            # 모델 입력을 위한 dy 계산
             dy = pos_y - enemy_y
 
-            # 5번 맵 테스트용으로 내 전차랑 적 전차가 맵밖으로 떨어지면 reset
             if pos_y < 5 or enemy_y < 5:
                 last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
-            # y축 (pitch) 각도 에측 후 앙상블
+            # y축 (pitch) 각도 보간
             target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)
             target_pitch_xgb = find_angle_for_distance_dy_xgb(distance, dy)
-            target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2 # 사용할 y 각도
+            target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2
 
             # 현재 터렛 각도와 목표 각도 차이 계산
             yaw_diff = target_yaw - turret_x
@@ -332,14 +389,13 @@ def get_action():
             
             # 최소 가중치 0.1 설정, 최대 1.0 제한
             def calc_pitch_weight(diff):
-                w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
+                w = min(max(abs(diff) / 30, 0.3), 1.0)  # 30도 내외로 가중치 조절 예시
                 return w
 
-            # 위 두 함수에서 최소 가중치를 낮게 할수록 조준 속도는 낮아지지만 정밀 조준 가능능
             yaw_weight = calc_yaw_weight(yaw_diff)
             pitch_weight = calc_pitch_weight(pitch_diff)
 
-            # 좌우 회전 명령 결정
+            # 좌우 회전 명령 결정 (Q: CCW, E: CW)
             if yaw_diff > 0.1:  # 목표가 오른쪽
                 turretQE_cmd = "E"
             elif yaw_diff < -0.1:  # 목표가 왼쪽
@@ -359,7 +415,7 @@ def get_action():
             aim_ready = bool(abs(yaw_diff) <= 0.1 and abs(pitch_diff) <= 0.1)
             print(f'🏹target_yaw : {target_yaw}, 🏹target_pitch : {target_pitch}')
 
-            # 이동은 일단 멈춤, 위에서 계산한 각도 오차에 따른 가중치로 조준
+            # 이동은 일단 멈춤
             command = {
                 "moveWS": {"command": "STOP", "weight": 1.0},
                 "moveAD": {"command": "", "weight": 0.0},
@@ -370,20 +426,19 @@ def get_action():
 
     return jsonify(command)
 
-# 전역 상태 저장 (시뮬레이터 reset 시킬 때 사용)
+# 전역 상태 저장
 last_bullet_info = {}
 
 @app.route('/update_bullet', methods=['POST'])
 def update_bullet():
     global last_bullet_info
-    # 발사한 탄이 지형 / 전차에 떨어 졌는지 저장해주는 변수
     last_bullet_info = request.get_json()
     print("💥 탄 정보 갱신됨:", last_bullet_info)
     return jsonify({"yolo_results": "ok"})
 
-enemy_pos = {} # 적 전차의 위치
-true_hit_ratio = [] # 평가를 위해서 사용했던 변수
-time = 0 # 시뮬레이터 시간
+enemy_pos = {}
+true_hit_ratio = []
+time = 0
 
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
@@ -397,17 +452,13 @@ def get_info():
     # body_z = data.get('playerBodyZ', 0)
     control = ""
 
-    # 45초가 지났는데도 탄이 발사되지 않았다면 reset
-    # 정확히는 지형 / 전차에 떨어진 탄이 없다면
     if time > 45:
         control = 'reset'
         FIND_MODE = True
         last_bullet_info = {}
         enemy_pos = {}
 
-    # 발사된 탄이 어딘가에 떨어졌을 때
     if last_bullet_info:
-        # 지형에 맞았다면
         if last_bullet_info.get("hit") == "terrain":
             print("🌀 탄이 지형에 명중! 전차를 초기화합니다.")
             FIND_MODE = True
@@ -418,7 +469,6 @@ def get_info():
             last_bullet_info = {}
             enemy_pos = {}
 
-        # 적 전차에 맞았다면
         if last_bullet_info.get("hit") == "enemy":
             print("🌀 탄이 적 전차에 명중! 전차를 초기화합니다.")
             FIND_MODE = True
@@ -428,7 +478,6 @@ def get_info():
             # df.to_csv("true_hit_ratio_map5_YOLO.csv", index=False)
             last_bullet_info = {}
             enemy_pos = {}
-        # 탄이 맞지않고 다양한 이유로 reset을 시킬 때
         else:
             control = "reset"
             FIND_MODE = True
@@ -490,7 +539,6 @@ def init():
 
     print("🛠️ /init 라우트 진입 확인!")
 
-    # 내 전차, 적 전차 시작 좌표 랜덤값
     blStartX = random.uniform(10, 290)
     blStartY = 10
     blStartZ = random.uniform(10, 290)
@@ -498,7 +546,6 @@ def init():
     rlStartY = 10
     rlStartZ = random.uniform(10, 290)
 
-    # 초기 거리 계산 위에서 설정한 조건에 충족하지 않으면 reset 시키기 위해서
     start_distance = math.sqrt(
         (blStartX - rlStartX)**2 +
         (blStartY - rlStartY)**2 +
