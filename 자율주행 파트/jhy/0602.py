@@ -1,4 +1,3 @@
-# 0613_lidar 이용해서 split_by_distance 함수, detect_obstacle_and_hill 함수, map_obstacle 함수 추가_희연코드
 # 그림 그리기 코드 적용
 # 장애물 뒤에 언덕 있을 경우, 장애물을 인식 못하는 문제를 해결하기 위해서 가장 가까운 포인트에만 Δy 적용
 # path[2]가 연산하는데 시간이 오래 걸리는 것 같아서 path[1]으로 바꿈
@@ -38,8 +37,8 @@ GRID_SIZE = 300  # 맵 크기
 maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 장애물 맵
 
 # 내 전차 시작 위치
-start_x = 230
-start_z = 260
+start_x = 20
+start_z = 50
 start = (start_x, start_z)
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
 destination_x = 250 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
@@ -204,14 +203,31 @@ def calculate_actual_path():
 # 여기 리스트에 cmd 2개를 넣는다
 combined_command_cache = []
 
+tank_detected = False
+tank_detect_time = None
+
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global target_reached, previous_position, current_yaw, current_position, last_position
     global start_time, end_time
+    global tank_detected, tank_detect_time
+    
     data = request.get_json(force=True)
     pos = data.get('position', {})
     pos_x = float(pos.get('x', 0))
     pos_z = float(pos.get('z', 0))
+
+        #주행하고 있는 중에 tank가 감지되면 멈추고 출발하기 
+    if tank_detected:
+        if tank_detect_time and time.time() - tank_detect_time < 3.0:  # 3초 정지
+            print("🛑 탱크 감지됨 → 일시 정지 중")
+            stop_cmd = {k: {'command': 'STOP', 'weight': 1.0} for k in ['moveWS', 'moveAD']}
+            return jsonify(stop_cmd)
+        else:
+            tank_detected = False
+            tank_detect_time = None
+            print("✅ 탱크 정지 해제, 이동 재개")
+        
 
     # tracking_mode가 True일 때만 시간 측정 시작
     if start_time is None: # 추가0605
@@ -327,7 +343,61 @@ def get_action():
     print(f"🚀 cmd 2개 {combined_command_cache}")
     return jsonify(combined_command_cache.pop(0))
 
+@app.route('/detect', methods=['POST'])
+def detect():
+    global tank_detected, tank_detect_time
 
+    image = request.files.get('image')
+    if not image:
+        return jsonify({"error": "No image received"}), 400
+
+    image_path = 'temp_image.jpg'
+    image.save(image_path)
+
+    results = model(image_path)
+    detections = results[0].boxes.data.cpu().numpy()
+
+    target_classes = {0: "car1", 1: "car2", 2: "human", 3: "tank"}
+    filtered_results = []
+
+    detected_classes = set()
+    tank_close = False
+
+    # 기준 크기 (예: 높이 또는 너비가 200픽셀 이상이면 가까움)
+    BBOX_SIZE_THRESHOLD = 200
+
+    for box in detections:
+        class_id = int(box[5])
+        if class_id in target_classes:
+            class_name = target_classes[class_id]
+            x1, y1, x2, y2 = box[:4]
+            width = x2 - x1
+            height = y2 - y1
+
+            detected_classes.add(class_name)
+            filtered_results.append({
+                'className': class_name,
+                'bbox': [float(coord) for coord in box[:4]],
+                'confidence': float(box[4]),
+                'color': '#00FF00',
+                'filled': False,
+                'updateBoxWhileMoving': False
+            })
+
+            # 탱크일 경우, 크기 판단
+            if class_name == "tank":
+                print(f"📦 탱크 bbox 크기: width={width:.1f}, height={height:.1f}")
+                if height >= BBOX_SIZE_THRESHOLD or width >= BBOX_SIZE_THRESHOLD:
+                    tank_close = True
+
+    if tank_close:
+        tank_detected = True
+        tank_detect_time = time.time()
+        print("🛑 탱크 bbox 큼 → 일시정지 준비")
+    else:
+        tank_detected = False
+
+    return jsonify(filtered_results)
 
 @app.route('/set_destination', methods=['POST'])
 def set_destination():
@@ -404,7 +474,7 @@ def split_by_distance(lidar_data):
     return lidar_data
 
 
-def detect_obstacle_and_hill(df):  # 언덕, 장애물 구분 함수
+def detect_obstacle_and_hill(df):
 
     hill_groups = set()  # 언덕 그룹 저장용...
     
@@ -421,7 +491,7 @@ def detect_obstacle_and_hill(df):  # 언덕, 장애물 구분 함수
         if len(coords) <= 2:  # 데이터 너무 적으면 언덕 취급
             hill_groups.add(i)
             continue
-    
+    # 45, 23
         no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
         # print("중복 제거 좌표값: ", no_dup_coords)
     
@@ -477,7 +547,7 @@ def detect_obstacle_and_hill(df):  # 언덕, 장애물 구분 함수
 
         return hill_groups
 
-def map_obstacle(only_obstacle_df):  # 장애물 맵에 반영 함수 
+def map_obstacle(only_obstacle_df):
     global maze, original_obstacles  # <- 전역 변수 선언
     
     for i in only_obstacle_df['line_group'].unique():
@@ -571,4 +641,3 @@ if __name__ == '__main__':
         print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
     finally:
         print(f"📊 총 충돌 횟수: {collision_count}회")
->>>>>>> jhy
