@@ -1,3 +1,4 @@
+# 0613_lidar 이용해서 split_by_distance 함수, detect_obstacle_and_hill 함수, map_obstacle 함수 추가_희연코드
 # 그림 그리기 코드 적용
 # 장애물 뒤에 언덕 있을 경우, 장애물을 인식 못하는 문제를 해결하기 위해서 가장 가까운 포인트에만 Δy 적용
 # path[2]가 연산하는데 시간이 오래 걸리는 것 같아서 path[1]으로 바꿈
@@ -403,7 +404,7 @@ def split_by_distance(lidar_data):
     return lidar_data
 
 
-def detect_obstacle_and_hill(df):
+def detect_obstacle_and_hill(df):  # 언덕, 장애물 구분 함수
 
     hill_groups = set()  # 언덕 그룹 저장용...
     
@@ -476,7 +477,7 @@ def detect_obstacle_and_hill(df):
 
         return hill_groups
 
-def map_obstacle(only_obstacle_df):
+def map_obstacle(only_obstacle_df):  # 장애물 맵에 반영 함수 
     global maze, original_obstacles  # <- 전역 변수 선언
     
     for i in only_obstacle_df['line_group'].unique():
