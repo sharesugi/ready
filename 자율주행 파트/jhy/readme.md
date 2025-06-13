@@ -2,7 +2,8 @@
 ### 0613
 - lidar에서 x,z 값 실시간으로 받아서 장애물 감지
 - 라이더 설정은 이렇게
-![image.png](attachment:5c2adc54-6f0a-49b6-9324-1bbff1795354:image.png)  
+![image](https://github.com/user-attachments/assets/55c9dc3c-15cd-4f49-8870-a6515fdeb3eb)
+
 - split_by_distance: 거리 기반으로 좌표 값 계산해서 가까운 것끼리 한 객체로 묶음.  
 ![image](https://github.com/user-attachments/assets/8204b0e1-fd75-49b6-8519-693b2bc32283)  
 - detect_obstacle_and_hill: 각도 계산을 해서 언덕과 장애물 구분 함수  
