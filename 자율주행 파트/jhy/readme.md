@@ -1,7 +1,7 @@
 코드를 직접 돌려보고 싶으면 0602.py 파일을 사용!
 ### 0613
 - lidar에서 x,z 값 실시간으로 받아서 장애물 감지
-- 라이더 설정은 이렇게
+- 라이더 설정은 이렇게  
 ![image](https://github.com/user-attachments/assets/55c9dc3c-15cd-4f49-8870-a6515fdeb3eb)
 
 - split_by_distance: 거리 기반으로 좌표 값 계산해서 가까운 것끼리 한 객체로 묶음.  
