@@ -4,6 +4,9 @@
 - lidar에서 x,z 값 실시간으로 받아서 장애물 감지
 - 라이더 설정은 이렇게  
 ![image](https://github.com/user-attachments/assets/55c9dc3c-15cd-4f49-8870-a6515fdeb3eb)
+- 이렇게 해도 돌아감.  
+  ![image](https://github.com/user-attachments/assets/3db97b88-7fe4-460a-81fb-78138a917f23)  
+
 
 - split_by_distance: 거리 기반으로 좌표 값 계산해서 가까운 것끼리 한 객체로 묶음.  
 ![image](https://github.com/user-attachments/assets/8204b0e1-fd75-49b6-8519-693b2bc32283)  
