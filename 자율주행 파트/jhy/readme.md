@@ -1,10 +1,25 @@
+[희연 코드]   
 코드를 직접 돌려보고 싶으면 0602.py 파일을 사용!
+### 0613
+- lidar에서 x,z 값 실시간으로 받아서 장애물 감지
+- 라이더 설정은 이렇게  
+![image](https://github.com/user-attachments/assets/55c9dc3c-15cd-4f49-8870-a6515fdeb3eb)
+- 이렇게 해도 돌아감.  
+  ![image](https://github.com/user-attachments/assets/3db97b88-7fe4-460a-81fb-78138a917f23)  
 
-[희연 코드]  
+
+- split_by_distance: 거리 기반으로 좌표 값 계산해서 가까운 것끼리 한 객체로 묶음.  
+![image](https://github.com/user-attachments/assets/8204b0e1-fd75-49b6-8519-693b2bc32283)  
+- detect_obstacle_and_hill: 각도 계산을 해서 언덕과 장애물 구분 함수  
+- map_obstacle: 감지한 장애물을 맵에 반영  
+
+- 작은 벽을 인식을 못해서 데이터 값이 작더라도 직선이면 인식하도록 바꿈.  
+
+--- 
 - path2: 2번 이동후 path 재계산하는 기능
 ---
 ### 0605
-- 추가기능: (시작점 -> 목적지) 도달 시간 추가
+- 추가기능: (시작점 -> 목적지) 도달 시간, 이동거리, 충돌횟수 추가
   - tracking mode 누른 시점부터 시간 셈   
 - 기존기능: path2 + 기홍님 휴리스틱 코드
 ![image](https://github.com/user-attachments/assets/4c03bdf1-6218-462d-81d1-f1dfc649bab6)  
@@ -40,3 +55,4 @@
 - 아침에 올라온 코드로 돌려봤을때  
 - 한번 이동 후 path 재계산  
 ![download](https://github.com/user-attachments/assets/73195860-40e0-4275-8ca1-af134ebd6b88)
+>>>>>>> jhy

@@ -11,14 +11,10 @@
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
 from queue import PriorityQueue
-from collections import defaultdict # 가까운 곳에만 Δy 적용할 때 사용함.
-from sklearn.cluster import DBSCAN # clustering 작업 - LiDAR에서 장애물 감지시 하나의 장애물을 1도, 2도, ... 의 정보로 받아오므로 걔네를 하나의 군집으로 묶는 역할
 import os
 import torch
 from ultralytics import YOLO
 import math
-import heapq
-import cv2
 import numpy as np
 import csv
 import pandas as pd
@@ -446,9 +442,9 @@ def collision():
 
 # DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
 # 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없
-def split_by_distance(lidar_data):   
-    x = lidar_data['x'].astype(int)
-    z = lidar_data['z'].astype(int)
+def split_by_distance(drive_lidar_data):   
+    x = drive_lidar_data['x'].astype(int)
+    z = drive_lidar_data['z'].astype(int)
     
     coords = np.column_stack((x, z))
     dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
@@ -462,16 +458,16 @@ def split_by_distance(lidar_data):
         group_ids[idx:] += 1
     
     # 그룹 ID를 데이터프레임에 추가
-    lidar_data['line_group'] = group_ids
+    drive_lidar_data['line_group'] = group_ids
 
     # ✅ 그룹별 개수 계산
-    group_counts = lidar_data['line_group'].value_counts()
+    group_counts = drive_lidar_data['line_group'].value_counts()
 
     # ✅ 너무 크거나 너무 작은 그룹 제거 (45 이상 또는 5 이하)
     bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
-    lidar_data = lidar_data[~lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
+    drive_lidar_data = drive_lidar_data[~drive_lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
 
-    return lidar_data
+    return drive_lidar_data
 
 
 def detect_obstacle_and_hill(df):
@@ -591,17 +587,17 @@ def info():
     # 여기서부터 수정 코드
     # 설정... 
     # channel 12, MinimapChannel 6, Y position 1, lidar position: Turret, sdl_uncheck, distance50
-    lidar_data = [  
+    drive_lidar_data = [  
         (pt["position"]["x"], pt["position"]["z"]) # ,pt["position"]["y"])
         for pt in data.get("lidarPoints", [])
         if pt.get("verticalAngle", 0) <= 2.045 and pt.get("isDetected", False) == True
     ]
-    if not lidar_data:
+    if not drive_lidar_data:
         print("라이다 감지되는 것 없음")
         return jsonify({"status": "no lidar points"})
 
     # 라이다 데이터 -> df로 변환...
-    lidar_df = pd.DataFrame(lidar_data, columns=['x', 'z']) 
+    lidar_df = pd.DataFrame(drive_lidar_data, columns=['x', 'z']) 
     split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
 
     hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
