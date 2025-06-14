@@ -6,6 +6,10 @@
 - 주행만 가능  
 - 라이다로 장애물, 지형 구분 가능
 
+목적지 도달 후 astar 함수 호출 횟수 출력함_ path1에서는 78이었으나 path 2에서는 42로 감소  
+![image](https://github.com/user-attachments/assets/db63dcf5-bd59-43f0-9f57-4ae2c0571fc8)  
+![download](https://github.com/user-attachments/assets/c7bb2221-7cec-40e7-8e49-621a9f675396)    
+
 ---
 
 ### 0613
