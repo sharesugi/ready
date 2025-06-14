@@ -24,10 +24,10 @@ FOV_HORIZONTAL = 47.81061
 FOV_VERTICAL = 28         
 
 # 터렛 각도 예측 모델 및 전처리기기 파일 경로
-MODEL_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/best_dnn_model.h5"
-XGB_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/best_xgb_model.pkl"
-SCALER_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/scaler.pkl"
-POLY_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/poly_transformer.pkl"
+MODEL_PATH = "home/kkh94df/jupyter_home/git_fileupload/ready/포탑제어 파트/오병직/turret_final/best_dnn_model.h5"
+XGB_PATH = "home/kkh94df/jupyter_home/git_fileupload/ready/포탑제어 파트/오병직/turret_final/best_xgb_model.pkl"
+SCALER_PATH = "git_fileupload/ready/포탑제어 파트/오병직/turret_final/poly_transformer.pkl"
+POLY_PATH = "git_fileupload/ready/포탑제어 파트/오병직/turret_final/scaler.pkl"
 
 # 모델 및 전처리기 불러오기
 model = load_model(MODEL_PATH)
