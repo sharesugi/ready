@@ -37,8 +37,8 @@ start_x = 20
 start_z = 50
 start = (start_x, start_z)
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-destination_x = 250 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
-destination_z = 280
+destination_x = 260 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
+destination_z = 46
 destination = (destination_x, destination_z)
 print(f"🕜️ 초기 destination 설정: {destination}")
 
@@ -579,6 +579,9 @@ def map_obstacle(only_obstacle_df):
 def info():
     global maze, original_obstacles
 
+    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+
+
     data = request.get_json(force=True)
     if not data:
         return jsonify({"error": "No JSON received"}), 400
@@ -628,11 +631,19 @@ def info():
 
     return jsonify({"status": "success", "obstacle_clusters": ""})
 
+@app.route('/update_obstacle', methods=['POST'])
+def update_obstacle():
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No data received'}), 400
+
+    print("🪨 Obstacle Data:", data)
+    return jsonify({'status': 'success', 'message': 'Obstacle data received'})
 
 # 서버 실행
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=3000)
+        app.run(host='0.0.0.0', port=5000)
     except KeyboardInterrupt:
         print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
     finally:
