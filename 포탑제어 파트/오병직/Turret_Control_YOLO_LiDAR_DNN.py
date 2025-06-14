@@ -17,7 +17,7 @@ from tensorflow.keras.models import load_model
 IMAGE_WIDTH = 1921
 IMAGE_HEIGHT = 1080
 
-# 카메라 각도도
+# 카메라 각도
 FOV_HORIZONTAL = 47.81061 
 FOV_VERTICAL = 28         
 
@@ -138,7 +138,8 @@ def detect():
             class_id = int(box[5])
             if class_id == 3: # 인식된 객체가 전차라면
                 FIND_MODE = False # 탐색 중지
-                current_bboxes.append({'x1': float(box[0]), 'y1': float(box[1]), 'x2': float(box[2]), 'y2': float(box[3])})
+                current_bboxes.append({'x1': float(box[0]), 'y1': float(box[1]), 
+                                       'x2': float(box[2]), 'y2': float(box[3])})
 
             if class_id in target_classes:
                 filtered_results.append({
@@ -227,7 +228,8 @@ len_angle_hist = -1
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
-    global enemy_pos, last_bullet_info, angle_hist, save_time, len_angle_hist, FIND_MODE, start_distance, yolo_results
+    global enemy_pos, last_bullet_info, angle_hist, save_time, len_angle_hist
+    global FIND_MODE, start_distance, yolo_results
 
     data = request.get_json(force=True)
 
@@ -306,9 +308,9 @@ def get_action():
             # 모델 입력을 위한 dy 계산
             dy = pos_y - enemy_y
 
-            # 5번 맵 테스트용으로 내 전차랑 적 전차가 맵밖으로 떨어지면 reset
-            if pos_y < 5 or enemy_y < 5:
-                last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+            # # 5번 맵 테스트용으로 내 전차랑 적 전차가 맵밖으로 떨어지면 reset
+            # if pos_y < 5 or enemy_y < 5:
+            #     last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
             # y축 (pitch) 각도 에측 후 앙상블
             target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)

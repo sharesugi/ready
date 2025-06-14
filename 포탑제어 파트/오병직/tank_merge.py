@@ -51,8 +51,8 @@ start_z = 50
 start = (start_x, start_z)
 
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-destination_x = 250 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
-destination_z = 280
+destination_x = 160 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
+destination_z = 260
 destination = (destination_x, destination_z)
 print(f"🕜️ 초기 destination 설정: {destination}")
 
@@ -658,6 +658,79 @@ def split_by_distance(drive_lidar_data):
 
     return drive_lidar_data
 
+def detect_obstacle_and_hill(df):
+
+    hill_groups = set()  # 언덕 그룹 저장용...
+    
+    for i in df['line_group'].unique():
+        group = df[df['line_group'] == i]
+        x = group['x'].astype(int)
+        z = group['z'].astype(int)
+
+        print(f"Group {i}: {len(group)} points")
+        
+        coords = list(zip(x, z))  # 좌표 튜플로 묶음.
+        # print("raw  좌표값: ",coords)
+
+        if len(coords) <= 2:  # 데이터 너무 적으면 언덕 취급
+            hill_groups.add(i)
+            continue
+    # 45, 23
+        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
+        # print("중복 제거 좌표값: ", no_dup_coords)
+    
+        arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
+        dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
+        dz = np.diff(arr[:, 1])
+    
+        angles = np.arctan2(dx, dz)
+        angle_deg = np.degrees(angles)  # 우리가 아는 각도 값으로 바꿈
+    
+        angle_diff_deg = np.diff(angle_deg) # 각도의 차이를 알자_ 확실한거는 다 0이면 직선이라는 것!!
+        sum_angle = sum(angle_diff_deg)
+
+        if 3 <= len(coords) <= 4:   # 4개에서 3개인데 직선이면...
+            if np.all(np.abs(sum_angle) < 1):
+                print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
+                continue
+        elif len(coords) <= 5:
+            print("❌ 데이터 부족하고 직선도 아님 → 제외")
+            hill_groups.add(i)
+            continue
+
+        # 각도가 잘 가다가 갑자기 90도로 꺾일때(차이)를 봐야하니까 angle_diff_deg 가 맞음. 
+        # angle_deg면 90도 방향의 직선에서 문제 생김!!!!
+        # 90도나 270이 생길 수 있음.
+        sharp_turns = np.sum((np.abs(angle_diff_deg) >= 80) & (np.abs(angle_diff_deg) <= 100) |
+                             (np.abs(angle_diff_deg) >= 260) & (np.abs(angle_diff_deg) <= 280))   
+
+        loose_turns = np.sum((np.abs(angle_diff_deg) <= 50) & (np.abs(angle_diff_deg) > 0))    # 곡선 판단용...
+
+    
+        if sum_angle == 0 and sharp_turns == 0 and loose_turns <= 2:
+            print(f"ㅡ ㅣ 장애물")
+            
+        # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
+        elif sharp_turns == 1  and loose_turns <=1 and (abs(sum_angle) == 90 or abs(sum_angle) == 270):   
+            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}")
+            
+         # 급하게 꺾이는 구간이 3개 이상이고(전차는 꺾임 구간이 2개라서 혹시 몰라서 임시방편으로...) 
+        # and 각도가 느슨하게 꺾이는 것이 3번 이상 발생하면 언덕...
+        elif sharp_turns > 1 and loose_turns >=3:  
+            print("급변하는 언덕")
+            hill_groups.add(i)
+            
+        elif sharp_turns and loose_turns:  # 급하게 꺾이는 구간은 없지만 느슨하게 서서히 꺾일 때
+            print("느슨한 언덕")
+            hill_groups.add(i)
+        else:  
+            # 이 부분 추후 수정 필요...
+            print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
+            hill_groups.add(i)
+        print()
+
+        return hill_groups
+
 def map_obstacle(only_obstacle_df):
     global maze, original_obstacles  # <- 전역 변수 선언
     
@@ -698,6 +771,8 @@ def get_info():
     global last_bullet_info, true_hit_ratio, s_time, lidar_data, MOVE_MODE, enemy_pos
     global maze, original_obstacles
 
+    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+
     data = request.get_json()
     lidar_data = data.get('lidarPoints', [])
     s_time = data.get("s_time", 0)
@@ -719,7 +794,11 @@ def get_info():
     lidar_df = pd.DataFrame(drive_lidar_data, columns=['x', 'z']) 
     split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
 
-    only_obstacle_df = split_lidar_df
+    hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
+    if hill_groups:  # 언덕으로 분류된게 있으면
+        only_obstacle_df = split_lidar_df[~split_lidar_df['line_group'].isin(hill_groups)]  # 언덕으로 분류된 것 죄다 버리기...
+    else:
+        only_obstacle_df = split_lidar_df
 
     if len(only_obstacle_df) == 0:
         print("감지되는 장애물 없음")
@@ -859,4 +938,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5004, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5005, debug=False, use_reloader=False)
