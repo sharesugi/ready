@@ -1,8 +1,9 @@
-# 그림 그리기 코드 적용
-# 장애물 뒤에 언덕 있을 경우, 장애물을 인식 못하는 문제를 해결하기 위해서 가장 가까운 포인트에만 Δy 적용
-# path[2]가 연산하는데 시간이 오래 걸리는 것 같아서 path[1]으로 바꿈
-# 그냥 개수만 받아오던 것에서 x,z 값의 좌표를 통해 하나의 장애물을 하나의 cluster로 묶어서 그 좌표들의 x_min,x_max,z_min,z_max값을 받아옴. 그 값을 기존의 update_obstacle 하던 부분에 넣기!
-# LiDAR로부터 감지되는 장애물의 정보를 받아오고자 함. 현재는 그냥 개수만 받아 옴
+# 주행만 되는 코드_ path2 있음.
+# 일단 라이다 설정은_ interval:0.5   Ypos: 1   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
+# 0614_ path 2 추가 
+# 0613_split_by_distance: 라이더로 감지한 물체들을 거리가반으로 객체를 나눔 
+# 0613_detect_obstacle_and_hill: 각도 계산을 해서 언덕과 장애물 구분 함수
+# 0613_map_obstacle: 감지한 장애물을 맵에 반영
 # 0609 LiDAR 적용을 시작
 # 0605_ 시작지점 -> 목적지점 도달 시간 추가_희연
 # 0604_휴리스틱 함수 추가
@@ -11,10 +12,14 @@
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
 from queue import PriorityQueue
+from collections import defaultdict # 가까운 곳에만 Δy 적용할 때 사용함.
+from sklearn.cluster import DBSCAN # clustering 작업 - LiDAR에서 장애물 감지시 하나의 장애물을 1도, 2도, ... 의 정보로 받아오므로 걔네를 하나의 군집으로 묶는 역할
 import os
 import torch
 from ultralytics import YOLO
 import math
+import heapq
+import cv2
 import numpy as np
 import csv
 import pandas as pd
@@ -37,8 +42,8 @@ start_x = 20
 start_z = 50
 start = (start_x, start_z)
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-destination_x = 260 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
-destination_z = 46
+destination_x = 250 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
+destination_z = 280
 destination = (destination_x, destination_z)
 print(f"🕜️ 초기 destination 설정: {destination}")
 
@@ -56,6 +61,11 @@ last_position = None
 position_history = []
 original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
 collision_points = [] # 전역변수에 collision point 추가(충돌 그림에 필요)
+
+# 여기 리스트에 cmd 2개를 넣는다...  
+# combined_command_cache = []
+
+astar_how_many_implement = 0
 
 # 충돌 없을 때 파일 저장
 with open('collision_points.json', 'w') as f:
@@ -100,6 +110,9 @@ def get_neighbors(pos):
     return neighbors
 
 def a_star(start, goal):
+    global astar_how_many_implement
+
+    astar_how_many_implement+=1
     open_set = PriorityQueue()
     open_set.put((0, Node(start)))
     closed = set()
@@ -128,7 +141,8 @@ def a_star(start, goal):
             open_set.put((node.f, node))
     return [start]
 
-path = a_star(start, destination)  # 현재 A* 결과
+# 현재 A* 결과. 어차피 get_action 함수에서 실행하니 좌표 두번 이동하고 a_star 실행하니까, 의미 없다 판단해서 주석처리
+# path = a_star(start, destination)  
 
 # 현재 위치와 다음 위치 간 각도 계산 함수
 def calculate_angle(current, next_pos): # A*알고리즘을 통해서 어디로 갈지 전체 경로를 정했기 때문에 다음 위치로만 가면 됨.
@@ -169,6 +183,8 @@ def is_valid_pos(pos, size=GRID_SIZE): # 장애물이 300x300 안에 있는지 �
 @app.route('/init', methods=['GET'])
 def init():
     global current_yaw, previous_position, target_reached
+    global combined_command_cache
+    
     current_yaw = INITIAL_YAW
     previous_position = None
     target_reached = False
@@ -195,18 +211,17 @@ def calculate_actual_path():
             total_distance += step_distance                        # 지금 이동한 거리(step_distance)를 누적 거리(total_distance)에 더함
     return total_distance
 
-    
-# 여기 리스트에 cmd 2개를 넣는다
-combined_command_cache = []
-
 tank_detected = False
 tank_detect_time = None
+
+combined_command_cache = []
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global target_reached, previous_position, current_yaw, current_position, last_position
     global start_time, end_time
     global tank_detected, tank_detect_time
+    global combined_command_cache
     
     data = request.get_json(force=True)
     pos = data.get('position', {})
@@ -250,28 +265,33 @@ def get_action():
     previous_position = (pos_x, pos_z)
 
     current_grid = (int(pos_x), int(pos_z))
-    path = a_star(current_grid, destination)
 
     #######################################################################
     # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
 
-    if combined_command_cache:
+    if combined_command_cache:  # 명령어가 남아있다면
     # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
         cmd = combined_command_cache.pop(0)
+        # print(f"👊두번째 명령어 실행_cmd : {cmd}")
         return jsonify(cmd)
+    elif not combined_command_cache: #or combined_command_cache is None:  # 비어있다면 = 명령어 두개 다 실행했다면, 이동 
+        print("combined_command_cache 비어있어서 a_star 실행해요...")
+        path = a_star(current_grid, destination)  
     
-    # if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
-    #     next_grid = path[1:3]  # 두번째 좌표 참조
-    if len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
+    if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
+        next_grid = path[1:3]  # 두번째 좌표 참조
+        # print(f"👊👊next_grid가 두개예요: {next_grid}👊👊")
+    elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
         next_grid = [path[1]]      # 한개씩 참조  
     else: 
         next_grid = [current_grid]   # 0개면 멈춰라! 도착한거니까!
 
     for i in range(len(next_grid)):  # 두개의 좌표가 맵을 빠져나기지 않는지 확인 # 0, 1
-
+        # print(f"i:{i},  (len(next_grid)) : {len(next_grid)}")
         # next_grid[1]의 회전 각도는 current 가 아니라 next_grid[0]에서 게산해야 맞음 
         base_pos = current_grid if i == 0 else next_grid[i - 1]  
-    
+
+        print(f"next_grid: {next_grid[i]}")
         if not is_valid_pos(next_grid[i]):  # 가야하는 곳이 맵 외에 있으면 움직이는거 멈춤
             stop_cmd = {k: {'command': '', 'weight': 0.0} for k in ['moveWS', 'moveAD']}
             stop_cmd['fire'] = False
@@ -319,6 +339,7 @@ def get_action():
 
         combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
 
+    # print(f"반복 나옴 {i}")
     # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
     if len(position_history) == 0:
         path = a_star((int(pos_x), int(pos_z)), destination)  # 현 위치에서 최종 목적지까지 다시 계산
@@ -335,9 +356,12 @@ def get_action():
 
 
     # print문 살짝 수정-희연
-    print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
+    print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})")
+    # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
     print(f"🚀 cmd 2개 {combined_command_cache}")
-    return jsonify(combined_command_cache.pop(0))
+    cmd = combined_command_cache.pop(0)
+    # print(f"cmd 하나만 : {cmd}")
+    return jsonify(cmd)
 
 @app.route('/detect', methods=['POST'])
 def detect():
@@ -442,9 +466,9 @@ def collision():
 
 # DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
 # 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없
-def split_by_distance(drive_lidar_data):   
-    x = drive_lidar_data['x'].astype(int)
-    z = drive_lidar_data['z'].astype(int)
+def split_by_distance(lidar_data):   
+    x = lidar_data['x'].astype(int)
+    z = lidar_data['z'].astype(int)
     
     coords = np.column_stack((x, z))
     dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
@@ -458,16 +482,16 @@ def split_by_distance(drive_lidar_data):
         group_ids[idx:] += 1
     
     # 그룹 ID를 데이터프레임에 추가
-    drive_lidar_data['line_group'] = group_ids
+    lidar_data['line_group'] = group_ids
 
     # ✅ 그룹별 개수 계산
-    group_counts = drive_lidar_data['line_group'].value_counts()
+    group_counts = lidar_data['line_group'].value_counts()
 
     # ✅ 너무 크거나 너무 작은 그룹 제거 (45 이상 또는 5 이하)
     bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
-    drive_lidar_data = drive_lidar_data[~drive_lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
+    lidar_data = lidar_data[~lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
 
-    return drive_lidar_data
+    return lidar_data
 
 
 def detect_obstacle_and_hill(df):
@@ -579,9 +603,6 @@ def map_obstacle(only_obstacle_df):
 def info():
     global maze, original_obstacles
 
-    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-
-
     data = request.get_json(force=True)
     if not data:
         return jsonify({"error": "No JSON received"}), 400
@@ -590,17 +611,17 @@ def info():
     # 여기서부터 수정 코드
     # 설정... 
     # channel 12, MinimapChannel 6, Y position 1, lidar position: Turret, sdl_uncheck, distance50
-    drive_lidar_data = [  
+    lidar_data = [  
         (pt["position"]["x"], pt["position"]["z"]) # ,pt["position"]["y"])
         for pt in data.get("lidarPoints", [])
         if pt.get("verticalAngle", 0) <= 2.045 and pt.get("isDetected", False) == True
     ]
-    if not drive_lidar_data:
+    if not lidar_data:
         print("라이다 감지되는 것 없음")
         return jsonify({"status": "no lidar points"})
 
     # 라이다 데이터 -> df로 변환...
-    lidar_df = pd.DataFrame(drive_lidar_data, columns=['x', 'z']) 
+    lidar_df = pd.DataFrame(lidar_data, columns=['x', 'z']) 
     split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
 
     hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
@@ -631,20 +652,13 @@ def info():
 
     return jsonify({"status": "success", "obstacle_clusters": ""})
 
-@app.route('/update_obstacle', methods=['POST'])
-def update_obstacle():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data received'}), 400
-
-    print("🪨 Obstacle Data:", data)
-    return jsonify({'status': 'success', 'message': 'Obstacle data received'})
 
 # 서버 실행
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=5000)
+        app.run(host='0.0.0.0', port=9000)
     except KeyboardInterrupt:
         print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
     finally:
         print(f"📊 총 충돌 횟수: {collision_count}회")
+        print(f"astar_how_many_implement: {astar_how_many_implement}")

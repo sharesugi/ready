@@ -1,5 +1,18 @@
 [희연 코드]   
-코드를 직접 돌려보고 싶으면 0602.py 파일을 사용!
+코드를 직접 돌려보고 싶으면 path2_only_autodrive.py 파일을 사용!  
+### 0614  
+- path2_only_autodrive  
+- path2 기능 추가  
+- 주행만 가능  
+- 라이다로 장애물, 지형 구분 가능
+
+목적지 도달 후 astar 함수 호출 횟수 출력함_ path1에서는 78이었으나 path 2에서는 42로 감소  
+<img width="505" alt="스크린샷 2025-06-14 175550" src="https://github.com/user-attachments/assets/d03d2f28-fae1-42c0-8f04-61da745c090c" />  
+
+![download](https://github.com/user-attachments/assets/c7bb2221-7cec-40e7-8e49-621a9f675396)    
+
+---
+
 ### 0613
 - lidar에서 x,z 값 실시간으로 받아서 장애물 감지
 - 라이더 설정은 이렇게  

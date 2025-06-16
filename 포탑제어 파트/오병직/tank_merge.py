@@ -51,8 +51,8 @@ start_z = 50
 start = (start_x, start_z)
 
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-destination_x = 160 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
-destination_z = 260
+destination_x = 260 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
+destination_z = 46
 destination = (destination_x, destination_z)
 print(f"🕜️ 초기 destination 설정: {destination}")
 
@@ -229,7 +229,7 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
 
     # 바운딩 박스 안에 찍힌 라이다 포인트들의 평균 좌표 및 거리
     avg_x = sum(p["position"]["x"] for p in candidates) / len(candidates)
-    avg_y = (sum(p["position"]["y"] for p in candidates) / len(candidates)) - 1
+    avg_y = sum(p["position"]["y"] for p in candidates) / len(candidates)
     avg_z = sum(p["position"]["z"] for p in candidates) / len(candidates)
     avg_dist = sum(p["distance"] for p in candidates) / len(candidates)
 
@@ -280,7 +280,7 @@ def detect():
     results = model_yolo(image_path)
     detections = results[0].boxes.data.cpu().numpy()
 
-    target_classes = {0: "car1", 1: "car2", 2: "human", 3: "tank"}
+    target_classes = {2: "human", 3: "tank"}
     filtered_results = []
     current_bboxes = [] # 인식된 전차의 바운딩 박스 좌표를 저장하기 위한 리스트
     for box in detections:
@@ -296,7 +296,7 @@ def detect():
                     'confidence': float(box[4]),
                     'color': '#00FF00',
                     'filled': False,
-                    'updateBoxWhileMoving': True
+                    'updateBoxWhileMoving': False
                 })
 
     # current_bboxes에 저장되어있는 현재 인식된 전차들의 바운딩 박스 좌표로 그 전차의 실제 좌표값 가져오기
@@ -533,7 +533,7 @@ def get_action():
             if angle_hist[len_angle_hist][:] == angle_hist[len_angle_hist - patience][:]:
                 angle_hist = []
                 len_angle_hist = -1
-                last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+                # last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
         
         # 적 위치
         enemy_x = enemy_pos.get("x", 0)
@@ -824,7 +824,7 @@ def get_info():
         if last_bullet_info.get("hit") == "terrain":
             print("🌀 탄이 지형에 명중! 전차를 초기화합니다.")
             MOVE_MODE = True
-            control = "reset"
+            control = ""
             last_bullet_info = {}
             enemy_pos = {}
 
@@ -832,12 +832,12 @@ def get_info():
         if last_bullet_info.get("hit") == "enemy":
             print("🌀 탄이 적 전차에 명중! 전차를 초기화합니다.")
             MOVE_MODE = True
-            control = "reset"
+            control = ""
             last_bullet_info = {}
             enemy_pos = {}
         # 탄이 맞지않고 다양한 이유로 reset을 시킬 때
         else:
-            control = "reset"
+            control = ""
             MOVE_MODE = True
             last_bullet_info = {}
             enemy_pos = {}
@@ -938,4 +938,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5005, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5006, debug=False, use_reloader=False)
