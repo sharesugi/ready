@@ -55,6 +55,42 @@ def get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_horizontal, f
 
     return h_angle, v_angle
 
+# pitch와 roll 보정을 적용하는 함수
+def correct_angles_with_rotation(h_angle, v_angle, pitch_deg, roll_deg):
+    # 라디안 변환
+    h_rad = math.radians(h_angle)
+    v_rad = math.radians(v_angle)
+    pitch = math.radians(pitch_deg)
+    roll = math.radians(roll_deg)
+
+    # 시선 방향 벡터 (카메라 기준)
+    x = math.cos(v_rad) * math.cos(h_rad)
+    y = math.cos(v_rad) * math.sin(h_rad)
+    z = math.sin(v_rad)
+    vec = np.array([[x], [y], [z]])
+
+    # 회전 행렬
+    Rx = np.array([
+        [1, 0, 0],
+        [0, math.cos(pitch), -math.sin(pitch)],
+        [0, math.sin(pitch), math.cos(pitch)]
+    ])
+    Ry = np.array([
+        [math.cos(roll), 0, math.sin(roll)],
+        [0, 1, 0],
+        [-math.sin(roll), 0, math.cos(roll)]
+    ])
+    R = Ry @ Rx
+
+    rotated_vec = R @ vec
+    x_r, y_r, z_r = rotated_vec.flatten()
+
+    # 보정된 각도 계산
+    corrected_h_angle = math.degrees(math.atan2(y_r, x_r))
+    corrected_v_angle = math.degrees(math.atan2(z_r, math.sqrt(x_r**2 + y_r**2)))
+
+    return corrected_h_angle, corrected_v_angle
+
 # 위 함수에서 가져온 각도로 바운딩 박스 안에 찍히는 라이다 값을 모두 가져와 평균값을 return 하는 함수
 def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
                                        bbox_width_ratio, bbox_height_ratio,
@@ -98,12 +134,15 @@ def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, 
     results = []
     for bbox in bboxes:
         h_angle, v_angle = get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_h, fov_v)
+        print(f'🎯 h_angle : {h_angle} 🎯 v_angle : {v_angle}')
 
-        # 바운딩박스 비율 계산
+        # 바운딩박스 비율 계산  
         bbox_width_ratio = (bbox["x2"] - bbox["x1"]) / image_width
         bbox_height_ratio = (bbox["y2"] - bbox["y1"]) / image_height
 
-        print(f'🎯 h_angle : {h_angle} 🎯 v_angle : {v_angle}')
+        # ✅ pitch, roll 보정 적용
+        h_angle, v_angle = correct_angles_with_rotation(h_angle, v_angle, pitch, roll)
+        print(f'🎯 corrected h_angle : {h_angle} 🎯 corrected v_angle : {v_angle}')
 
         # LiDAR 클러스터 추정
         cluster = find_lidar_cluster_center_adaptive(
@@ -403,7 +442,7 @@ body = {}
 
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
-    global last_bullet_info, time, lidar_data, FIND_MODE, enemy_pos, body, dist_df
+    global last_bullet_info, true_hit_ratio, time, lidar_data, FIND_MODE, enemy_pos, body, dist_df
     global turret_evaluate
 
     data = request.get_json()
@@ -433,7 +472,7 @@ def get_info():
             control = "reset"
             turret_evaluate.append([0, abs(dist_df)])
             df = pd.DataFrame(turret_evaluate, columns=["is_hit", "dist_df"])
-            df.to_csv("true_hit_ratio_no_RM_10.csv", index=False)
+            df.to_csv("true_hit_ratio_w_RM.csv", index=False)
             last_bullet_info = {}
             enemy_pos = {}
 
@@ -444,7 +483,7 @@ def get_info():
             control = "reset"
             turret_evaluate.append([1, abs(dist_df)])
             df = pd.DataFrame(turret_evaluate, columns=["is_hit", "dist_df"])
-            df.to_csv("true_hit_ratio_no_RM_10.csv", index=False)
+            df.to_csv("true_hit_ratio_w_RM.csv", index=False)
             last_bullet_info = {}
             enemy_pos = {}
         # 탄이 맞지않고 다양한 이유로 reset을 시킬 때
