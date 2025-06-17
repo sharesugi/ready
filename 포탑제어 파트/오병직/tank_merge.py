@@ -1,3 +1,5 @@
+# 0616 병직님 코드에서 buffer 2번 들어간 것 빼고, path[2] 적용
+
 # Y Position : 1.5
 # Channel : 65
 # Max Distance : 150
@@ -24,10 +26,10 @@ FOV_HORIZONTAL = 47.81061
 FOV_VERTICAL = 28         
 
 # 터렛 각도 예측 모델 및 전처리기기 파일 경로
-MODEL_PATH = "home/kkh94df/jupyter_home/git_fileupload/ready/포탑제어 파트/오병직/turret_final/best_dnn_model.h5"
-XGB_PATH = "home/kkh94df/jupyter_home/git_fileupload/ready/포탑제어 파트/오병직/turret_final/best_xgb_model.pkl"
-SCALER_PATH = "git_fileupload/ready/포탑제어 파트/오병직/turret_final/poly_transformer.pkl"
-POLY_PATH = "git_fileupload/ready/포탑제어 파트/오병직/turret_final/scaler.pkl"
+MODEL_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/best_dnn_model.h5"
+XGB_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/best_xgb_model.pkl"
+SCALER_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/scaler.pkl"
+POLY_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/poly_transformer.pkl"
 
 # 모델 및 전처리기 불러오기
 model = load_model(MODEL_PATH)
@@ -56,7 +58,7 @@ destination_z = 46
 destination = (destination_x, destination_z)
 print(f"🕜️ 초기 destination 설정: {destination}")
 
-INITIAL_YAW = 90.0  # 초기 YAW 값 - 맨 처음 전차의 방향이 0도이기 때문에 0.0 줌. 이를  
+INITIAL_YAW = 0.0  # 초기 YAW 값 - 맨 처음 전차의 방향이 0도이기 때문에 0.0 줌. 이를  
 current_yaw = INITIAL_YAW  # 현재 차체 방향 추정치 -> playerBodyX로 바꾸면 좋겠으나 실패... playerBodyX의 정보를 받아 오는데 딜레이가 걸린다면 지금처럼 current_yaw값 쓰는게 좋다고 함(by GPT)
 previous_position = None  # 이전 위치 (yaw 계산용)
 target_reached = False  # 목표 도달 유무 플래그
@@ -70,6 +72,8 @@ last_position = None
 position_history = []
 original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
 collision_points = [] # 전역변수에 collision point 추가(충돌 그림에 필요)
+
+astar_how_many_implement = 0 # 0616 희연님 코드 추가
 
 # 충돌 없을 때 파일 저장
 with open('collision_points.json', 'w') as f:
@@ -114,6 +118,9 @@ def get_neighbors(pos):
     return neighbors
 
 def a_star(start, goal):
+    global astar_how_many_implement # 0616 희연님 코드 추가
+
+    astar_how_many_implement+=1 # 0616 희연님 코드 추가
     open_set = PriorityQueue()
     open_set.put((0, Node(start)))
     closed = set()
@@ -135,14 +142,11 @@ def a_star(start, goal):
             dz = abs(nbr[1] - current.position[1])
             step_cost = math.sqrt(2) if dx != 0 and dz != 0 else 1
 
-            
             node.g = current.g + step_cost
             node.h = heuristic(nbr, goal)
             node.f = node.g + node.h
             open_set.put((node.f, node))
     return [start]
-
-path = a_star(start, destination)  # 현재 A* 결과
 
 # 현재 위치와 다음 위치 간 각도 계산 함수
 def calculate_angle(current, next_pos): # A*알고리즘을 통해서 어디로 갈지 전체 경로를 정했기 때문에 다음 위치로만 가면 됨.
@@ -152,15 +156,14 @@ def calculate_angle(current, next_pos): # A*알고리즘을 통해서 어디로 
 
 # 전방 장애물 감지 함수_ 기홍님 추가 _0602_ 아침에 깃허브에서 받음
 # 함수 설명:이동하기 전에, 지금 위치와 현재 바라보는 방향(yaw)을 기준으로 
-# 앞으로 radius만큼 한 칸씩 쭉 살펴봐서, 장애물(maze에서 1로 표시된 곳)이 있으면 미리 감지. 
-# 그래서 아직 이동하지 않았어도 앞으로 막히는지 미리 확인 가능.
+# 앞으로 radius만큼 한 칸씩 쭉 살펴봐서, 장애물(maze에서 1로 표시된 곳)이 있으면 미리 감속 -> 회피 시간 늘어남.
 def is_obstacle_ahead(pos, yaw, maze, radius=30):
     """
     현재 yaw(도 단위) 방향 기준 전방 radius만큼 검사.
     장애물(maze=1)이 있으면 True 리턴.
     """
-    x, z = pos   # 현좌표
-    rad = math.radians(yaw)   # 현각도 라디안으로 변경
+    x, z = pos   # 현 좌표
+    rad = math.radians(yaw)   # 현 각도 라디안으로 변경
     dx = math.cos(rad)       
     dz = math.sin(rad)
 
@@ -173,11 +176,12 @@ def is_obstacle_ahead(pos, yaw, maze, radius=30):
                 return True
     return False
 
-# 장애물 맵 유효 위치 확인
-def is_valid_pos(pos, size=GRID_SIZE): # 장애물이 300x300 안에 있는지 확인
+# 맵 유효 위치 확인
+def is_valid_pos(pos, size=GRID_SIZE): # 내 전차 혹은 A* 경로가 300x300 안에 있는지 확인
     x, z = pos
     return 0 <= x < size and 0 <= z < size
 
+# 이동 거리 구하는 함수(평가용)
 def calculate_actual_path():
     global total_distance
     
@@ -210,16 +214,18 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
                                        bbox_width_ratio, bbox_height_ratio,
                                        fov_horizontal=47.81061,
                                        fov_vertical=28.0):
+    BOX_THRESHOLD = 0.8
+
     # 바운딩박스 크기에 따라 허용 각도 조정
-    h_angle_tol = bbox_width_ratio * fov_horizontal
-    v_angle_tol = bbox_height_ratio * fov_vertical
+    h_angle_tol = bbox_width_ratio * fov_horizontal * BOX_THRESHOLD
+    v_angle_tol = bbox_height_ratio * fov_vertical * BOX_THRESHOLD
 
     # 전체 라이다 데이터에서 박스안에 해당하는 라이다 포인트만 저장
     candidates = [
         p for p in lidar_points
         if p["isDetected"]
         and abs((p["angle"] - h_angle + 180) % 360 - 180) < h_angle_tol
-        and abs(p.get("verticalAngle", 0) - v_angle) < v_angle_tol
+        and abs(p.get("verticalAngle", 0) + v_angle) < v_angle_tol
     ]
 
     # 박스가 그려진 각도에 라이다 값이 없다면 (여기가 문제. 라이다 데이터를 촘촘하게 받지 않으면 못찾음.)
@@ -296,7 +302,7 @@ def detect():
                     'confidence': float(box[4]),
                     'color': '#00FF00',
                     'filled': False,
-                    'updateBoxWhileMoving': False
+                    'updateBoxWhileMoving': True
                 })
 
     # current_bboxes에 저장되어있는 현재 인식된 전차들의 바운딩 박스 좌표로 그 전차의 실제 좌표값 가져오기
@@ -380,15 +386,15 @@ len_angle_hist = -1
 # 여기 리스트에 cmd 2개를 넣는다
 combined_command_cache = []
 
-tank_detected = False
-tank_detect_time = None
+# tank_detected = False     # 0616 쓸모 없어진 부분인듯?
+# tank_detect_time = None   # 0616 쓸모 없어진 부분인듯?
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global enemy_pos, last_bullet_info, angle_hist, save_time, len_angle_hist, MOVE_MODE, start_distance, yolo_results
     global target_reached, previous_position, current_yaw, current_position, last_position
     global start_time, end_time
-    global tank_detected, tank_detect_time
+    # global tank_detected, tank_detect_time   # 0616 쓸모 없어진 부분인듯?
 
     data = request.get_json(force=True)
 
@@ -407,11 +413,12 @@ def get_action():
     print(f'🗺️ MOVE_MODE : {MOVE_MODE}')
 
     if MOVE_MODE: # 적 전차를 탐색하는 상태일 때
+        # 이동 시간, 거리 등 평가용
         if start_time is None: # 추가0605
             start_time = time.time()  
             print("🟢 trackingMode 활성화: 시간 기록 시작")  
         
-        if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0:
+        if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0: # 거리 5 미만이면 도착으로 간주
             target_reached = True  
             end_time = time.time()  # 추가0605
             elapsed = end_time - start_time  
@@ -441,16 +448,16 @@ def get_action():
             cmd = combined_command_cache.pop(0)
             return jsonify(cmd)
         
-        # if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
-        #     next_grid = path[1:3]  # 두번째 좌표 참조
-        if len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
+        if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
+            next_grid = path[1:3]  # 1~2번째 좌표 참조
+        elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
             next_grid = [path[1]]      # 한개씩 참조  
         else: 
             next_grid = [current_grid]   # 0개면 멈춰라! 도착한거니까!
 
         for i in range(len(next_grid)):  # 두개의 좌표가 맵을 빠져나기지 않는지 확인 # 0, 1
 
-            # next_grid[1]의 회전 각도는 current 가 아니라 next_grid[0]에서 게산해야 맞음 
+            # next_grid[1]의 회전 각도는 current 가 아니라 next_grid[0]에서 계산해야 맞음 
             base_pos = current_grid if i == 0 else next_grid[i - 1]  
         
             if not is_valid_pos(next_grid[i]):  # 가야하는 곳이 맵 외에 있으면 움직이는거 멈춤
@@ -463,10 +470,12 @@ def get_action():
             if diff > 180:  # 이거는 정규화 비슷
                 diff -= 360
 
-            # 이건 그냥 유클리드 거리. sqrt는 제곱근! 현위치랑 목적좌표까지의 거리 
+            # 이건 그냥 유클리드 거리. sqrt는 제곱근! 현위치랑 목적좌표까지의 거리
+            # 목적지 근처에 가면 천천히 뒷 키 잡으려고, 목적지까지 남은 거리를 계산.
             distance = math.sqrt((pos_x - destination[0])**2 + (pos_z - destination[1])**2)
-
+    
             # 전방 장애물 감지 _ 기홍님이 새로 추가 0602_ 오늘 아침에 깃허브에서 받음
+            # 장애물이 눈 앞에 있으면 뒷 키 잡으려고, 장애물이 눈 앞에 있는지 판단.
             ahead_obstacle = is_obstacle_ahead(base_pos, current_yaw, maze)
 
             if distance < 50 :   # 앞으로 가는 weight
@@ -500,13 +509,13 @@ def get_action():
 
             combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
 
-        # 처음 1회 A* 경로 계산_ 기홍님이 새로 추가
+        # 처음 1회 A* 경로 계산_ 출발할 때 구한 A* 경로 시각화용
         if len(position_history) == 0:
             path = a_star((int(pos_x), int(pos_z)), destination)  # 현 위치에서 최종 목적지까지 다시 계산
             df = pd.DataFrame(path, columns=["x", "z"])
             df.to_csv("a_star_path.csv", index=False)
 
-        
+        # 내 전차의 이동 경로 시각화용
         if current_grid:
             last_position = current_grid
         position_history.append(current_grid)
@@ -516,9 +525,10 @@ def get_action():
 
 
         # print문 살짝 수정-희연
-        print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f}) yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
+        print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})") # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
         print(f"🚀 cmd 2개 {combined_command_cache}")
-        return jsonify(combined_command_cache.pop(0))
+        cmd = combined_command_cache.pop(0)
+        return jsonify(cmd)
 
     else: # 적 전차를 찾았다면 (화면에 적 전차에 대한 바운딩 박스가 그려져 있다면)
         # 아래 273~284번 줄은 조준 가능한 각도인지 판단하고, 조준불가능한 각도라면 reset하는 코드
@@ -533,7 +543,7 @@ def get_action():
             if angle_hist[len_angle_hist][:] == angle_hist[len_angle_hist - patience][:]:
                 angle_hist = []
                 len_angle_hist = -1
-                # last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
+                last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
         
         # 적 위치
         enemy_x = enemy_pos.get("x", 0)
@@ -560,7 +570,7 @@ def get_action():
         if pos_y < 5 or enemy_y < 5:
             last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
-        # y축 (pitch) 각도 에측 후 앙상블
+        # y축 (pitch) 각도 예측 후 앙상블
         target_pitch_dnn = find_angle_for_distance_dy_dnn(distance, dy)
         target_pitch_xgb = find_angle_for_distance_dy_xgb(distance, dy)
         target_pitch = (target_pitch_dnn + target_pitch_xgb) / 2 # 사용할 y 각도
@@ -585,7 +595,7 @@ def get_action():
             w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
             return w
 
-        # 위 두 함수에서 최소 가중치를 낮게 할수록 조준 속도는 낮아지지만 정밀 조준 가능능
+        # 위 두 함수에서 최소 가중치를 낮게 할수록 조준 속도는 낮아지지만 정밀 조준 가능
         yaw_weight = calc_yaw_weight(yaw_diff)
         pitch_weight = calc_pitch_weight(pitch_diff)
 
@@ -631,12 +641,16 @@ def update_bullet():
     print("💥 탄 정보 갱신됨:", last_bullet_info)
     return jsonify({"yolo_results": "ok"})
 
+# DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
+# 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없음
 def split_by_distance(drive_lidar_data):   
+    # LiDAR data에서 x, z값 좌표 받아옴.
     x = drive_lidar_data['x'].astype(int)
     z = drive_lidar_data['z'].astype(int)
-    
-    coords = np.column_stack((x, z))
-    dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
+
+    coords = np.column_stack((x, z)) # 받아온 값을 numpy 배열로 쌓음.
+    dist = np.linalg.norm(np.diff(coords, axis=0), axis=1) # np.diff - 각 점끼리의 벡터 차이 구함. np.linalg.norm - 벡터의 길이 구함.
+    # 연속된 점들간의 거리를 구해서 dist에 저장함.
     
     threshold = 3.0  # 연결 판단 거리
     split_idx = np.where(dist > threshold)[0] + 1
@@ -652,7 +666,7 @@ def split_by_distance(drive_lidar_data):
     # ✅ 그룹별 개수 계산
     group_counts = drive_lidar_data['line_group'].value_counts()
 
-    # ✅ 너무 크거나 너무 작은 그룹 제거 (45 이상 또는 5 이하)
+    # ✅ 너무 큰 그룹 제거 (45 이상)
     bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
     drive_lidar_data = drive_lidar_data[~drive_lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
 
@@ -784,7 +798,7 @@ def get_info():
     drive_lidar_data = [  
         (pt["position"]["x"], pt["position"]["z"]) # ,pt["position"]["y"])
         for pt in data.get("lidarPoints", [])
-        if pt.get("verticalAngle", 0) <= 2.045 and pt.get("isDetected", False) == True
+        if pt.get("verticalAngle", 0) <= 1.045 and pt.get("isDetected", False) == True
     ]
     if not drive_lidar_data:
         print("라이다 감지되는 것 없음")
@@ -938,4 +952,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5006, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)

@@ -1,13 +1,4 @@
 {
-  "collision_count": 2,
-  "collision_points": [
-    [
-      151.8306,
-      49.73734
-    ],
-    [
-      152.2056,
-      47.78315
-    ]
-  ]
+  "collision_count": 0,
+  "collision_points": []
 }
