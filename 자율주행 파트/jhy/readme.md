@@ -1,5 +1,29 @@
 [희연 코드]   
 코드를 직접 돌려보고 싶으면 path2_only_autodrive.py 파일을 사용!  
+
+### 0617
+- 포격팀과 통일하기로 한 라이다 설정에 맞추기
+- interval time:0.3   Ypos: 1   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
+- path2_only_autodrive.py 돌려볼 때 interval time 은 0.5로 일단 돌려보기는 함.
+
+[변경된 함수]
+- split_by_distance 함수 수정:
+  - ![aebc8f91-59bd-40df-bae4-83d502921cb0](https://github.com/user-attachments/assets/bb5f76d5-6041-4946-9e5c-1fc90e10c01f)
+  - 위 사진은 지형만 감지한 라이더의 x,z 를 그래프로 그렸을 때, 지형은 좌표가 멀리 떨어지는 경우가 많아 한 객체로 분류하기 어렵다.
+  - ![image.png](attachment:07933bcb-61cc-4f69-bd0f-2ceea183881b:image.png)
+  (이렇게 분류됨)
+  - vertical_angle 값으로 그룹으로 묶은 뒤 그 안에서 각 좌표의 거리기반으로 나누는 방식으로 바꿈
+  - 멀리 떨어져 있는 객체는 하나의 unique 한 line_group을 못 가지게 하고 -1로
+  - ![5a32d72b-a373-44a8-863c-0d438c9de415.png](attachment:2a6fa960-62ad-4f0a-9b36-e66dba31cd15:5a32d72b-a373-44a8-863c-0d438c9de415.png)
+  - 위처럼 개선됨
+-  detect_obstacle_and_hill 함수 수정:
+  - return문 들여쓰기. (for 문 안에 있어서 다 계산하기도 전에 함수가 종료됨)
+    - 복사 붙여넣기 하는 과정에서 실수로 들여쓰기 된 것 같음... 다음에 주의
+- 
+
+
+
+---
 ### 0614  
 - path2_only_autodrive  
 - path2 기능 추가  
