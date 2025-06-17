@@ -286,13 +286,15 @@ def detect():
     results = model_yolo(image_path)
     detections = results[0].boxes.data.cpu().numpy()
 
+    is_tank = False
     target_classes = {2: "human", 3: "tank"}
     filtered_results = []
     current_bboxes = [] # 인식된 전차의 바운딩 박스 좌표를 저장하기 위한 리스트
     for box in detections:
-        if box[4] >= 0.85: # confidence가 0.85 이상인 것만 인식
+        if box[4] >= 0.9: # confidence가 0.9 이상인 것만 인식
             class_id = int(box[5])
             if class_id == 3: # 인식된 객체가 전차라면
+                is_tank = True
                 current_bboxes.append({'x1': float(box[0]), 'y1': float(box[1]), 'x2': float(box[2]), 'y2': float(box[3])})
 
             if class_id in target_classes:
@@ -315,7 +317,7 @@ def detect():
         fov_v=FOV_VERTICAL
     )   
 
-    if yolo_results and yolo_results[0]['distance'] <= 100:
+    if is_tank and yolo_results and yolo_results[0]['distance'] <= 100:
         MOVE_MODE = False
 
     print(f'🗺️ yolo_results : {yolo_results}')
@@ -643,30 +645,37 @@ def update_bullet():
 
 # DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
 # 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없음
-def split_by_distance(lidar_data):   
-    x = lidar_data['x'].astype(int)
-    z = lidar_data['z'].astype(int)
-    
-    coords = np.column_stack((x, z))
-    dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
-    
-    threshold = 3.0  # 연결 판단 거리
-    split_idx = np.where(dist > threshold)[0] + 1
-    
-    # 그룹 ID 생성
-    group_ids = np.zeros(len(x), dtype=int)
-    for i, idx in enumerate(split_idx):
-        group_ids[idx:] += 1
-    
-    # 그룹 ID를 데이터프레임에 추가
-    lidar_data['line_group'] = group_ids
+def split_by_distance(lidar_data, threshold=4, min_group_size=4):
+    lidar_data = lidar_data.copy()
+    lidar_data['line_group'] = -1  # 초기화
+    group_counter = 0  # 전역 고유 그룹 ID
 
-    # ✅ 그룹별 개수 계산
-    group_counts = lidar_data['line_group'].value_counts()
+    for angle in lidar_data['verticalAngle'].unique():
+        group = lidar_data[lidar_data['verticalAngle'] == angle].copy()
 
-    # ✅ 너무 크거나 너무 작은 그룹 제거 (45 이상 또는 5 이하)
-    # bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
-    # lidar_data = lidar_data[~lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
+        x = group['x'].astype(float)
+        z = group['z'].astype(float)
+        coords = np.column_stack((x, z))
+
+        if len(coords) < 2:
+            continue  # 이미 -1로 되어 있음
+
+        dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
+        split_idx = np.where(dist > threshold)[0] + 1
+
+        local_group_ids = np.zeros(len(group), dtype=int)
+        for i, idx in enumerate(split_idx):
+            local_group_ids[idx:] += 1
+
+        # 각 소그룹에 대해 처리
+        for local_id in np.unique(local_group_ids):
+            mask = (local_group_ids == local_id)
+            indices = group.index[mask]
+            if mask.sum() < min_group_size:
+                lidar_data.loc[indices, 'line_group'] = -1
+            else:
+                lidar_data.loc[indices, 'line_group'] = group_counter
+                group_counter += 1
 
     return lidar_data
 
@@ -676,10 +685,14 @@ def detect_obstacle_and_hill(df):
     
     for i in df['line_group'].unique():
         group = df[df['line_group'] == i]
+
+        if i == -1:
+            hill_groups.add(i)
+            continue
+
         x = group['x'].astype(int)
         z = group['z'].astype(int)
 
-        
         coords = list(zip(x, z))  # 좌표 튜플로 묶음.
         # print("raw  좌표값: ",coords)
 
@@ -724,12 +737,12 @@ def detect_obstacle_and_hill(df):
         loose_turns = np.sum((np.abs(angle_diff_deg) <= 50) & (np.abs(angle_diff_deg) > 0))    # 곡선 판단용...
 
     
-        if sum_angle == 0 and sharp_turns == 0 and loose_turns <= 2:
-            print(f"ㅡ ㅣ 장애물")
+        if sum_angle == 0 and sharp_turns == 0 and loose_turns == 0:
+            print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
             
         # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
         elif sharp_turns == 1  and loose_turns <=1 and (abs(sum_angle) == 90 or abs(sum_angle) == 270):   
-            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}")
+            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
             
          # 급하게 꺾이는 구간이 3개 이상이고(전차는 꺾임 구간이 2개라서 혹시 몰라서 임시방편으로...) 
         # and 각도가 느슨하게 꺾이는 것이 3번 이상 발생하면 언덕...
@@ -800,7 +813,7 @@ def get_info():
     control = ""
 
     drive_lidar_data = [  
-        (pt["position"]["x"], pt["position"]["z"]) # ,pt["position"]["y"])
+        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"]) # ,pt["position"]["y"])
         for pt in data.get("lidarPoints", [])
         if pt.get("verticalAngle", 0) <= 1.045 and pt.get("isDetected", False) == True
     ]
@@ -809,7 +822,7 @@ def get_info():
         return jsonify({"status": "no lidar points"})
 
     # 라이다 데이터 -> df로 변환...
-    lidar_df = pd.DataFrame(drive_lidar_data, columns=['x', 'z']) 
+    lidar_df = pd.DataFrame(drive_lidar_data, columns=['x', 'z', 'verticalAngle']) 
     split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
 
     hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
@@ -956,4 +969,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5002, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5003, debug=False, use_reloader=False)
