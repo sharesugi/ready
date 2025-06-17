@@ -643,14 +643,12 @@ def update_bullet():
 
 # DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
 # 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없음
-def split_by_distance(drive_lidar_data):   
-    # LiDAR data에서 x, z값 좌표 받아옴.
-    x = drive_lidar_data['x'].astype(int)
-    z = drive_lidar_data['z'].astype(int)
-
-    coords = np.column_stack((x, z)) # 받아온 값을 numpy 배열로 쌓음.
-    dist = np.linalg.norm(np.diff(coords, axis=0), axis=1) # np.diff - 각 점끼리의 벡터 차이 구함. np.linalg.norm - 벡터의 길이 구함.
-    # 연속된 점들간의 거리를 구해서 dist에 저장함.
+def split_by_distance(lidar_data):   
+    x = lidar_data['x'].astype(int)
+    z = lidar_data['z'].astype(int)
+    
+    coords = np.column_stack((x, z))
+    dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
     
     threshold = 3.0  # 연결 판단 거리
     split_idx = np.where(dist > threshold)[0] + 1
@@ -661,16 +659,16 @@ def split_by_distance(drive_lidar_data):
         group_ids[idx:] += 1
     
     # 그룹 ID를 데이터프레임에 추가
-    drive_lidar_data['line_group'] = group_ids
+    lidar_data['line_group'] = group_ids
 
     # ✅ 그룹별 개수 계산
-    group_counts = drive_lidar_data['line_group'].value_counts()
+    group_counts = lidar_data['line_group'].value_counts()
 
-    # ✅ 너무 큰 그룹 제거 (45 이상)
-    bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
-    drive_lidar_data = drive_lidar_data[~drive_lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
+    # ✅ 너무 크거나 너무 작은 그룹 제거 (45 이상 또는 5 이하)
+    # bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
+    # lidar_data = lidar_data[~lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
 
-    return drive_lidar_data
+    return lidar_data
 
 def detect_obstacle_and_hill(df):
 
@@ -681,18 +679,23 @@ def detect_obstacle_and_hill(df):
         x = group['x'].astype(int)
         z = group['z'].astype(int)
 
-        print(f"Group {i}: {len(group)} points")
         
         coords = list(zip(x, z))  # 좌표 튜플로 묶음.
         # print("raw  좌표값: ",coords)
 
+        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
+        # print("중복 제거 좌표값: ", no_dup_coords)
+
         if len(coords) <= 2:  # 데이터 너무 적으면 언덕 취급
             hill_groups.add(i)
             continue
-    # 45, 23
-        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
-        # print("중복 제거 좌표값: ", no_dup_coords)
-    
+                    
+        if len(coords) > 50:  # 데이터 과다 = 언덕
+            hill_groups.add(i)
+            continue
+
+        print(f"Group {i}: {len(group)} points")
+        
         arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
         dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
         dz = np.diff(arr[:, 1])
@@ -743,7 +746,8 @@ def detect_obstacle_and_hill(df):
             hill_groups.add(i)
         print()
 
-        return hill_groups
+    # print(f"hill_groups: {hill_groups}")
+    return hill_groups
 
 def map_obstacle(only_obstacle_df):
     global maze, original_obstacles  # <- 전역 변수 선언
@@ -952,4 +956,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5002, debug=False, use_reloader=False)

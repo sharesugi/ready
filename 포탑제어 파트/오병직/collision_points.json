@@ -1,4 +1,9 @@
 {
-  "collision_count": 0,
-  "collision_points": []
+  "collision_count": 1,
+  "collision_points": [
+    [
+      151.9949,
+      50.80332
+    ]
+  ]
 }
