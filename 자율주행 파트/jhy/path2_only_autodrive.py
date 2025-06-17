@@ -488,8 +488,8 @@ def split_by_distance(lidar_data):
     group_counts = lidar_data['line_group'].value_counts()
 
     # ✅ 너무 크거나 너무 작은 그룹 제거 (45 이상 또는 5 이하)
-    bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
-    lidar_data = lidar_data[~lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
+    # bad_groups = group_counts[(group_counts >= 45) ].index  # | (group_counts <= 5)
+    # lidar_data = lidar_data[~lidar_data['line_group'].isin(bad_groups)].reset_index(drop=True)
 
     return lidar_data
 
@@ -503,18 +503,23 @@ def detect_obstacle_and_hill(df):
         x = group['x'].astype(int)
         z = group['z'].astype(int)
 
-        print(f"Group {i}: {len(group)} points")
         
         coords = list(zip(x, z))  # 좌표 튜플로 묶음.
         # print("raw  좌표값: ",coords)
 
+        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
+        # print("중복 제거 좌표값: ", no_dup_coords)
+
         if len(coords) <= 2:  # 데이터 너무 적으면 언덕 취급
             hill_groups.add(i)
             continue
-    # 45, 23
-        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
-        # print("중복 제거 좌표값: ", no_dup_coords)
-    
+                    
+        if len(coords) > 50:  # 데이터 과다 = 언덕
+            hill_groups.add(i)
+            continue
+
+        print(f"Group {i}: {len(group)} points")
+        
         arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
         dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
         dz = np.diff(arr[:, 1])
@@ -565,7 +570,8 @@ def detect_obstacle_and_hill(df):
             hill_groups.add(i)
         print()
 
-        return hill_groups
+    # print(f"hill_groups: {hill_groups}")
+    return hill_groups
 
 def map_obstacle(only_obstacle_df):
     global maze, original_obstacles  # <- 전역 변수 선언
@@ -614,7 +620,7 @@ def info():
     lidar_data = [  
         (pt["position"]["x"], pt["position"]["z"]) # ,pt["position"]["y"])
         for pt in data.get("lidarPoints", [])
-        if pt.get("verticalAngle", 0) <= 2.045 and pt.get("isDetected", False) == True
+        if pt.get("verticalAngle", 0) < 4 and pt.get("isDetected", False) == True
     ]
     if not lidar_data:
         print("라이다 감지되는 것 없음")
@@ -656,7 +662,7 @@ def info():
 # 서버 실행
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=9000)
+        app.run(host='0.0.0.0', port=3000)
     except KeyboardInterrupt:
         print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
     finally:
