@@ -620,6 +620,9 @@ def map_obstacle(only_obstacle_df):
 def info():
     global maze, original_obstacles
 
+    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    original_obstacles = []
+
     data = request.get_json(force=True)
     if not data:
         return jsonify({"error": "No JSON received"}), 400
@@ -628,11 +631,16 @@ def info():
     # 여기서부터 수정 코드
     # 설정... 
     # channel 12, MinimapChannel 6, Y position 1, lidar position: Turret, sdl_uncheck, distance50
-    lidar_data = [  
-        (pt["position"]["x"], pt["position"]["z"],pt["verticalAngle"]) # ,pt["position"]["y"])
+    lidar_data = [
+        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
         for pt in data.get("lidarPoints", [])
-        if pt.get("verticalAngle", 0) < 2 and pt.get("isDetected", False) == True
+        if (
+            -1 < pt.get("verticalAngle", 0) < 4 and
+            pt.get("verticalAngle") != 2.045455 and
+            pt.get("isDetected", False) == True
+        )
     ]
+    
     if not lidar_data:
         print("라이다 감지되는 것 없음")
         return jsonify({"status": "no lidar points"})
