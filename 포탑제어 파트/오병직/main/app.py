@@ -248,7 +248,6 @@ def get_action():
         previous_position = (pos_x, pos_z)
 
         current_grid = (int(pos_x), int(pos_z))
-        path = a_star(current_grid, destination)
 
         #######################################################################
         # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
@@ -257,6 +256,8 @@ def get_action():
         # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
             cmd = combined_command_cache.pop(0)
             return jsonify(cmd)
+        elif not combined_command_cache:  # 명령어 두 개 다 실행해서 비어있으면
+            path = a_star(current_grid, destination)  # 이 때만 astar 실행
         
         if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
             next_grid = path[1:3]  # 1~2번째 좌표 참조
