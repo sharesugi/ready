@@ -1,5 +1,5 @@
 # 주행만 되는 코드_ path2 있음.
-# 일단 라이다 설정은_ interval:0.5   Ypos: 1   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
+# 일단 라이다 설정은_ interval:0.5   Ypos: 1.61   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
 # 0614_ path 2 추가 
 # 0613_split_by_distance: 라이더로 감지한 물체들을 거리가반으로 객체를 나눔 
 # 0613_detect_obstacle_and_hill: 각도 계산을 해서 언덕과 장애물 구분 함수
@@ -630,7 +630,7 @@ def info():
 
     # 여기서부터 수정 코드
     # 설정... 
-    # channel 12, MinimapChannel 6, Y position 1, lidar position: Turret, sdl_uncheck, distance50
+    # channel 12, MinimapChannel 6, Y position 1.65, lidar position: Turret, sdl_uncheck, distance50
     lidar_data = [
         (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
         for pt in data.get("lidarPoints", [])
