@@ -497,10 +497,14 @@ def get_info():
     body_x = data.get('playerBodyX', 0)
     control = ""
 
-    drive_lidar_data = [  
-        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"]) # ,pt["position"]["y"])
+    drive_lidar_data = [
+        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
         for pt in data.get("lidarPoints", [])
-        if pt.get("verticalAngle", 0) <= 1.045 and pt.get("isDetected", False) == True
+        if (
+            -1 < pt.get("verticalAngle", 0) < 4 and
+            pt.get("verticalAngle") != 2.045455 and
+            pt.get("isDetected", False) == True
+        )
     ]
     if not drive_lidar_data:
         print("라이다 감지되는 것 없음")
