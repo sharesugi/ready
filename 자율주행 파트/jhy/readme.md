@@ -1,6 +1,11 @@
 [희연 코드]   
 코드를 직접 돌려보고 싶으면 path2_only_autodrive.py 파일을 사용!  
 
+### 0618
+- 포격팀과 통일하기로 한 라이다 설정에 맞추기
+- interval time:0.3   Ypos: 1.65   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
+- Ypos: 1.65에 맞춰서 가져오는 라이더 설정 변경
+
 ### 0617
 - 포격팀과 통일하기로 한 라이다 설정에 맞추기
 - interval time:0.3   Ypos: 1   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
