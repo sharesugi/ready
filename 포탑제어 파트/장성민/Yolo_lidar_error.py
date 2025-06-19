@@ -14,7 +14,7 @@ import joblib
 from tensorflow.keras.models import load_model
 
 # 화면 해상도 (스크린샷 찍었을 때 이미지 크기)
-IMAGE_WIDTH = 1921
+IMAGE_WIDTH = 1920
 IMAGE_HEIGHT = 1080
 
 # 카메라 각도
@@ -140,7 +140,7 @@ def detect():
     results = model_yolo(image_path)
     detections = results[0].boxes.data.cpu().numpy()
 
-    target_classes = {0: "car1", 1: "car2", 2: "human", 3: "tank"}
+    target_classes = {2: "human", 3: "tank"}
     filtered_results = []
     current_bboxes = [] # 인식된 전차의 바운딩 박스 좌표를 저장하기 위한 리스트
     for box in detections:
@@ -239,7 +239,7 @@ len_angle_hist = -1
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global enemy_pos, last_bullet_info, angle_hist, save_time, len_angle_hist
-    global FIND_MODE, start_distance, yolo_results, lidar_detect_results, real_enemy_pos
+    global FIND_MODE, start_distance, yolo_results, lidar_detect_results, real_enemy_pos, lidar_rotation
 
     data = request.get_json(force=True)
 
@@ -259,7 +259,7 @@ def get_action():
 
     if FIND_MODE: # 적 전차를 탐색하는 상태일 때
         # 처음 시작되고 적 전차와 내 전차의 거리가 20 이하 110 이상이면 reset
-        if start_distance >= 101 or start_distance <= 20:
+        if start_distance >= 110 or start_distance <= 20:
             # last_bullet_info에 데이터가 들어가면 reset됨
             last_bullet_info = {'x':None, 'y':None, 'z':None, 'hit':None}
 
@@ -300,6 +300,8 @@ def get_action():
             enemy_y = enemy_pos.get("y", 0)
             enemy_z = enemy_pos.get("z", 0)
 
+            bboxes = yolo_results[0]['bbox']
+
             player_pos = {"x": pos_x, "y": pos_y, "z": pos_z}
             enemy_pos = {"x": enemy_x, "y": enemy_y, "z": enemy_z}
 
@@ -326,8 +328,15 @@ def get_action():
                 "real_enemy_pos_y": real_enemy_pos['y'],
                 "real_enemy_pos_z": real_enemy_pos['z'],
                 "player_pos_x": player_pos['x'],
-                "player_my_pos_y": player_pos['y'],
+                "player_pos_y": player_pos['y'],
                 "player_pos_z": player_pos['z'],
+                "bbox_x1": bboxes['x1'],
+                "bbox_y1": bboxes['y1'],
+                "bbox_x2": bboxes['x2'],
+                "bbox_y2": bboxes['y2'],
+                "lidar_yaw": lidar_rotation['y'],
+                "lidar_pitch": lidar_rotation['x'],
+                "lidar_roll": lidar_rotation['z'],
                 "distance_to_enemy": distance_to_enemy,
                 "height_diff": height_diff,
                 "x_diff": x_diff,
@@ -339,7 +348,7 @@ def get_action():
             # DataFrame 생성
             df = pd.DataFrame(lidar_detect_results)
             
-            file_path = "lidar_detection_log.csv"
+            file_path = "lidar_detection.csv"
             write_header = not os.path.exists(file_path)
 
             # 파일에 누적 저장
@@ -383,12 +392,12 @@ def get_action():
 
             # 최소 가중치 0.01 설정, 최대 1.0 제한
             def calc_yaw_weight(diff):
-                w = min(max(abs(diff) / 30, 0.01), 1.0)  # 30도 내외로 가중치 조절 예시
+                w = min(max(abs(diff) / 15, 0.01), 2.0)  # 30도 내외로 가중치 조절 예시
                 return w
             
             # 최소 가중치 0.1 설정, 최대 1.0 제한
             def calc_pitch_weight(diff):
-                w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
+                w = min(max(abs(diff) / 10, 0.01), 3.0)  # 30도 내외로 가중치 조절 예시
                 return w
 
             # 위 두 함수에서 최소 가중치를 낮게 할수록 조준 속도는 낮아지지만 정밀 조준 가능능
@@ -443,12 +452,13 @@ time = 0 # 시뮬레이터 시간
 
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
-    global last_bullet_info, true_hit_ratio, time, lidar_data, FIND_MODE, enemy_pos, real_enemy_pos
+    global last_bullet_info, true_hit_ratio, time, lidar_data, FIND_MODE, enemy_pos, real_enemy_pos, lidar_rotation
 
     data = request.get_json()
     lidar_data = data.get('lidarPoints', [])
     time = data.get("time", 0)
     real_enemy_pos = data.get('enemyPos', 0)
+    lidar_rotation = data.get('lidarRotation', 0)
     # body_y = data.get('playerBodyY', 0)
     # body_z = data.get('playerBodyZ', 0)
     control = ""
@@ -588,4 +598,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5002, debug=False, use_reloader=False)
