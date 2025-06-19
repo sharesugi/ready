@@ -1,9 +1,14 @@
 [희연 코드]   
 코드를 직접 돌려보고 싶으면 path2_only_autodrive.py 파일을 사용!  
+### 0619
+- 라이다 설정: interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: -     max_distance: 110     lidar_position: turret
+- info 함수에서 라이다 가져오는 조건값 수정
+- info 함수와, info 함수 내에서 사용하는 함수들 전부 위로 올림.(위치만 바꿈)
+- path 3로 변경
 
 ### 0618
 - 포격팀과 통일하기로 한 라이다 설정에 맞추기
-- interval time:0.3   Ypos: 1.65   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
+- interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: 6     max_distance: 110     lidar_position: turret
 - Ypos: 1.65에 맞춰서 가져오는 라이더 설정 변경
 
 ### 0617
