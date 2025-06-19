@@ -14,7 +14,7 @@ import joblib
 from tensorflow.keras.models import load_model
 
 # 화면 해상도 (스크린샷 찍었을 때 이미지 크기)
-IMAGE_WIDTH = 1920
+IMAGE_WIDTH = 1921
 IMAGE_HEIGHT = 1080
 
 # 카메라 각도
