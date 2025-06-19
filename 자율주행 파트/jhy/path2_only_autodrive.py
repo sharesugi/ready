@@ -1,5 +1,5 @@
-# 주행만 되는 코드_ path2 있음.
-# 일단 라이다 설정은_ interval:0.5   Ypos: 1.61   Channel: 12      minimapChannel: 6     max_distance: 50     lidar_position: turret
+# 0619_ 가져오는 라이더 설정값 변경, info 함수와 info 함수가 쓰는 함수들 위로 가져옴, path 3로 바꿔봄: 일단 적용해보니 부딫히는건 3번중 한번꼴(거의 스치듯이 부딫힘)
+# 라이다 고정 설정(포격팀과 통일한)_ interval:0.3   Ypos: 1.61   Channel: 45      minimapChannel: -    max_distance: 110     lidar_position: turret
 # 0614_ path 2 추가 
 # 0613_split_by_distance: 라이더로 감지한 물체들을 거리가반으로 객체를 나눔 
 # 0613_detect_obstacle_and_hill: 각도 계산을 해서 언덕과 장애물 구분 함수
@@ -12,8 +12,6 @@
 # Flask 및 필요한 라이브러리 불러오기
 from flask import Flask, request, jsonify
 from queue import PriorityQueue
-from collections import defaultdict # 가까운 곳에만 Δy 적용할 때 사용함.
-from sklearn.cluster import DBSCAN # clustering 작업 - LiDAR에서 장애물 감지시 하나의 장애물을 1도, 2도, ... 의 정보로 받아오므로 걔네를 하나의 군집으로 묶는 역할
 import os
 import torch
 from ultralytics import YOLO
@@ -25,7 +23,7 @@ import csv
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
-import time  # 추가0605
+import time  # 추가0605_이동 시간 타이머
 import numpy as np
 
 # Flask 앱 초기화 및 YOLO 모델 로드
@@ -45,6 +43,8 @@ start = (start_x, start_z)
 destination_x = 250 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
 destination_z = 280
 destination = (destination_x, destination_z)
+
+# 238, 40
 print(f"🕜️ 초기 destination 설정: {destination}")
 
 INITIAL_YAW = 90.0  # 초기 YAW 값 - 맨 처음 전차의 방향이 0도이기 때문에 0.0 줌. 이를  
@@ -77,6 +77,227 @@ with open('collision_points.json', 'w') as f:
 # 시간 세는 부분
 start_time = None
 end_time = None
+
+
+# DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
+# 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없
+def split_by_distance(lidar_data, threshold=4, min_group_size=4):
+    lidar_data = lidar_data.copy()
+    lidar_data['line_group'] = -1  # 초기화
+    group_counter = 0  # 전역 고유 그룹 ID
+
+    for angle in lidar_data['verticalAngle'].unique():
+        group = lidar_data[lidar_data['verticalAngle'] == angle].copy()
+
+        x = group['x'].astype(float)
+        z = group['z'].astype(float)
+        coords = np.column_stack((x, z))
+
+        if len(coords) < 2:
+            continue  # 이미 -1로 되어 있음
+
+        dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
+        split_idx = np.where(dist > threshold)[0] + 1
+
+        local_group_ids = np.zeros(len(group), dtype=int)
+        for i, idx in enumerate(split_idx):
+            local_group_ids[idx:] += 1
+
+        # 각 소그룹에 대해 처리
+        for local_id in np.unique(local_group_ids):
+            mask = (local_group_ids == local_id)
+            indices = group.index[mask]
+            if mask.sum() < min_group_size:
+                lidar_data.loc[indices, 'line_group'] = -1
+            else:
+                lidar_data.loc[indices, 'line_group'] = group_counter
+                group_counter += 1
+
+    return lidar_data
+
+
+def detect_obstacle_and_hill(df):
+
+    hill_groups = set()  # 언덕 그룹 저장용...
+    
+    for i in df['line_group'].unique():
+        group = df[df['line_group'] == i]
+
+        if i == -1:
+            hill_groups.add(i)
+            continue
+
+        x = group['x'].astype(int)
+        z = group['z'].astype(int)
+
+        coords = list(zip(x, z))  # 좌표 튜플로 묶음.
+        # print("raw  좌표값: ",coords)
+
+        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
+        # print("중복 제거 좌표값: ", no_dup_coords)
+
+        if len(coords) <= 2:  # 데이터 너무 적으면 언덕 취급
+            hill_groups.add(i)
+            continue
+                    
+        if len(coords) > 50:  # 데이터 과다 = 언덕
+            hill_groups.add(i)
+            continue
+
+        print(f"Group {i}: {len(group)} points")
+        
+        arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
+        dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
+        dz = np.diff(arr[:, 1])
+    
+        angles = np.arctan2(dx, dz)
+        angle_deg = np.degrees(angles)  # 우리가 아는 각도 값으로 바꿈
+    
+        angle_diff_deg = np.diff(angle_deg) # 각도의 차이를 알자_ 확실한거는 다 0이면 직선이라는 것!!
+        sum_angle = sum(angle_diff_deg)
+
+        if 3 <= len(coords) <= 4:   # 4개에서 3개인데 직선이면...
+            if np.all(np.abs(sum_angle) < 1):
+                print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
+                continue
+        elif len(coords) <= 5:
+            print("❌ 데이터 부족하고 직선도 아님 → 제외")
+            hill_groups.add(i)
+            continue
+
+        # 각도가 잘 가다가 갑자기 90도로 꺾일때(차이)를 봐야하니까 angle_diff_deg 가 맞음. 
+        # angle_deg면 90도 방향의 직선에서 문제 생김!!!!
+        # 90도나 270이 생길 수 있음.
+        sharp_turns = np.sum((np.abs(angle_diff_deg) >= 80) & (np.abs(angle_diff_deg) <= 100) |
+                             (np.abs(angle_diff_deg) >= 260) & (np.abs(angle_diff_deg) <= 280))   
+
+        loose_turns = np.sum((np.abs(angle_diff_deg) <= 50) & (np.abs(angle_diff_deg) > 0))    # 곡선 판단용...
+
+    
+        if sum_angle == 0 and sharp_turns == 0 and loose_turns == 0:
+            print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
+            
+        # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
+        elif sharp_turns == 1  and loose_turns <=1 and (abs(sum_angle) == 90 or abs(sum_angle) == 270):   
+            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
+            
+         # 급하게 꺾이는 구간이 3개 이상이고(전차는 꺾임 구간이 2개라서 혹시 몰라서 임시방편으로...) 
+        # and 각도가 느슨하게 꺾이는 것이 3번 이상 발생하면 언덕...
+        elif sharp_turns > 1 and loose_turns >=3:  
+            print("급변하는 언덕")
+            hill_groups.add(i)
+            
+        elif sharp_turns and loose_turns:  # 급하게 꺾이는 구간은 없지만 느슨하게 서서히 꺾일 때
+            print("느슨한 언덕")
+            hill_groups.add(i)
+        else:  
+            # 이 부분 추후 수정 필요...
+            print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
+            hill_groups.add(i)
+        print()
+
+    # print(f"hill_groups: {hill_groups}")
+    return hill_groups
+
+def map_obstacle(only_obstacle_df):
+    global maze, original_obstacles  # <- 전역 변수 선언
+    
+    for i in only_obstacle_df['line_group'].unique():
+        obstacle_points = only_obstacle_df[only_obstacle_df['line_group'] == i]
+        x_min_raw = int(np.min(obstacle_points['x']))   # x 값의 최소, 최대
+        x_max_raw = int(np.max(obstacle_points['x']))
+        z_min_raw = int(np.min(obstacle_points['z']))  # z 값의 최소 최대
+        z_max_raw = int(np.max(obstacle_points['z']))
+
+        # ✅ 시각화용 원본 좌표 저장
+        original_obstacles.append({
+            "x_min": x_min_raw,
+            "x_max": x_max_raw,
+            "z_min": z_min_raw,
+            "z_max": z_max_raw
+        })
+
+        # 👉 A*용 maze에는 buffer 적용
+        buffer = 5
+        x_min = max(0, x_min_raw - buffer)
+        x_max = min(GRID_SIZE - 1, x_max_raw + buffer)
+        z_min = max(0, z_min_raw - buffer)
+        z_max = min(GRID_SIZE - 1, z_max_raw + buffer)
+
+        # map에 적용. 따로 일반 함수로 빼놔도 좋을 듯...
+        for x in range(x_min, x_max + 1):
+            for z in range(z_min, z_max + 1):
+                if maze[z][x] == 0:  # 이미 마킹된 경우는 생략
+                    maze[z][x] = 1
+
+
+def initialize_maze(grid_size):
+    maze = [[0 for _ in range(grid_size)] for _ in range(grid_size)]
+    original_obstacles = []
+    return maze, original_obstacles
+
+@app.route('/info', methods=['POST'])
+def info():
+    global maze, original_obstacles
+
+    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    original_obstacles = []
+    # maze = initialize_maze()
+
+    data = request.get_json(force=True)
+    if not data:
+        return jsonify({"error": "No JSON received"}), 400
+
+
+    # 여기서부터 수정 코드
+    # 설정... 
+    # channel 12, MinimapChannel 6, Y position 1.65, lidar position: Turret, sdl_uncheck, distance50
+    lidar_data = [
+        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
+        for pt in data.get("lidarPoints", [])
+        if (
+            4 < pt.get("verticalAngle", 0) < 7 and
+           # pt.get("verticalAngle") != 2.045455 and
+            pt.get("isDetected", False) == True
+        )
+    ]
+    
+    if not lidar_data:
+        print("라이다 감지되는 것 없음")
+        return jsonify({"status": "no lidar points"})
+
+    # 라이다 데이터 -> df로 변환...
+    lidar_df = pd.DataFrame(lidar_data, columns=['x', 'z', 'verticalAngle']) 
+    split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
+
+    hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
+    if hill_groups:  # 언덕으로 분류된게 있으면
+        only_obstacle_df = split_lidar_df[~split_lidar_df['line_group'].isin(hill_groups)]  # 언덕으로 분류된 것 죄다 버리기...
+    else:
+        only_obstacle_df = split_lidar_df
+
+    if len(only_obstacle_df) == 0:
+        print("감지되는 장애물 없음")
+        # continue  #  ..?
+        # return jsonify({"status": "no obstacles detected"})  # 끝내기.
+    else:
+        map_obstacle(only_obstacle_df)
+    
+    #여기서부터 수정 끝##############
+
+    try:
+        json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
+        with open(json_path, "w") as f:
+            json.dump(original_obstacles, f, indent=2)
+        print("✅ original_obstacles.json 저장 완료")
+
+        np.save("maze.npy", np.array(maze))
+        np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
+    except Exception as e:
+        print(f"❌ 장애물 저장 실패: {e}")
+
+    return jsonify({"status": "success", "obstacle_clusters": ""})
+    
 
 # A* 알고리즘 관련 클래스 및 함수 정의
 class Node:
@@ -278,8 +499,8 @@ def get_action():
         # print("combined_command_cache 비어있어서 a_star 실행해요...")
         path = a_star(current_grid, destination)  
     
-    if len(path) > 2:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
-        next_grid = path[1:3]  # 두번째 좌표 참조
+    if len(path) > 3:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
+        next_grid = path[1:4]  # 두번째 좌표 참조
         # print(f"👊👊next_grid가 두개예요: {next_grid}👊👊")
     elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
         next_grid = [path[1]]      # 한개씩 참조  
@@ -462,220 +683,6 @@ def collision():
         print(f"💥 Collision #{collision_count} at ({x}, {z})")
 
     return jsonify({'status': 'success', 'collision_count': collision_count})
-
-
-# DBSCAN 대체 방안 함수... 인접한 좌표들의 거리 차이를 통해서 라벨링을 함.
-# 단점?_ 값이 자주 튀는 언덕이나 곡선이면 연결된 선의 형태라도 나뉘어질 수 있다... 일단 동작에는 문제 없
-def split_by_distance(lidar_data, threshold=4, min_group_size=4):
-    lidar_data = lidar_data.copy()
-    lidar_data['line_group'] = -1  # 초기화
-    group_counter = 0  # 전역 고유 그룹 ID
-
-    for angle in lidar_data['verticalAngle'].unique():
-        group = lidar_data[lidar_data['verticalAngle'] == angle].copy()
-
-        x = group['x'].astype(float)
-        z = group['z'].astype(float)
-        coords = np.column_stack((x, z))
-
-        if len(coords) < 2:
-            continue  # 이미 -1로 되어 있음
-
-        dist = np.linalg.norm(np.diff(coords, axis=0), axis=1)
-        split_idx = np.where(dist > threshold)[0] + 1
-
-        local_group_ids = np.zeros(len(group), dtype=int)
-        for i, idx in enumerate(split_idx):
-            local_group_ids[idx:] += 1
-
-        # 각 소그룹에 대해 처리
-        for local_id in np.unique(local_group_ids):
-            mask = (local_group_ids == local_id)
-            indices = group.index[mask]
-            if mask.sum() < min_group_size:
-                lidar_data.loc[indices, 'line_group'] = -1
-            else:
-                lidar_data.loc[indices, 'line_group'] = group_counter
-                group_counter += 1
-
-    return lidar_data
-
-
-def detect_obstacle_and_hill(df):
-
-    hill_groups = set()  # 언덕 그룹 저장용...
-    
-    for i in df['line_group'].unique():
-        group = df[df['line_group'] == i]
-
-        if i == -1:
-            hill_groups.add(i)
-            continue
-
-        x = group['x'].astype(int)
-        z = group['z'].astype(int)
-
-        coords = list(zip(x, z))  # 좌표 튜플로 묶음.
-        # print("raw  좌표값: ",coords)
-
-        no_dup_coords = list(dict.fromkeys(coords))  # 계산량을 줄이기 위해서 중복은 줄임.  
-        # print("중복 제거 좌표값: ", no_dup_coords)
-
-        if len(coords) <= 2:  # 데이터 너무 적으면 언덕 취급
-            hill_groups.add(i)
-            continue
-                    
-        if len(coords) > 50:  # 데이터 과다 = 언덕
-            hill_groups.add(i)
-            continue
-
-        print(f"Group {i}: {len(group)} points")
-        
-        arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
-        dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
-        dz = np.diff(arr[:, 1])
-    
-        angles = np.arctan2(dx, dz)
-        angle_deg = np.degrees(angles)  # 우리가 아는 각도 값으로 바꿈
-    
-        angle_diff_deg = np.diff(angle_deg) # 각도의 차이를 알자_ 확실한거는 다 0이면 직선이라는 것!!
-        sum_angle = sum(angle_diff_deg)
-
-        if 3 <= len(coords) <= 4:   # 4개에서 3개인데 직선이면...
-            if np.all(np.abs(sum_angle) < 1):
-                print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
-                continue
-        elif len(coords) <= 5:
-            print("❌ 데이터 부족하고 직선도 아님 → 제외")
-            hill_groups.add(i)
-            continue
-
-        # 각도가 잘 가다가 갑자기 90도로 꺾일때(차이)를 봐야하니까 angle_diff_deg 가 맞음. 
-        # angle_deg면 90도 방향의 직선에서 문제 생김!!!!
-        # 90도나 270이 생길 수 있음.
-        sharp_turns = np.sum((np.abs(angle_diff_deg) >= 80) & (np.abs(angle_diff_deg) <= 100) |
-                             (np.abs(angle_diff_deg) >= 260) & (np.abs(angle_diff_deg) <= 280))   
-
-        loose_turns = np.sum((np.abs(angle_diff_deg) <= 50) & (np.abs(angle_diff_deg) > 0))    # 곡선 판단용...
-
-    
-        if sum_angle == 0 and sharp_turns == 0 and loose_turns == 0:
-            print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
-            
-        # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
-        elif sharp_turns == 1  and loose_turns <=1 and (abs(sum_angle) == 90 or abs(sum_angle) == 270):   
-            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
-            
-         # 급하게 꺾이는 구간이 3개 이상이고(전차는 꺾임 구간이 2개라서 혹시 몰라서 임시방편으로...) 
-        # and 각도가 느슨하게 꺾이는 것이 3번 이상 발생하면 언덕...
-        elif sharp_turns > 1 and loose_turns >=3:  
-            print("급변하는 언덕")
-            hill_groups.add(i)
-            
-        elif sharp_turns and loose_turns:  # 급하게 꺾이는 구간은 없지만 느슨하게 서서히 꺾일 때
-            print("느슨한 언덕")
-            hill_groups.add(i)
-        else:  
-            # 이 부분 추후 수정 필요...
-            print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
-            hill_groups.add(i)
-        print()
-
-    # print(f"hill_groups: {hill_groups}")
-    return hill_groups
-
-def map_obstacle(only_obstacle_df):
-    global maze, original_obstacles  # <- 전역 변수 선언
-    
-    for i in only_obstacle_df['line_group'].unique():
-        obstacle_points = only_obstacle_df[only_obstacle_df['line_group'] == i]
-        x_min_raw = int(np.min(obstacle_points['x']))   # x 값의 최소, 최대
-        x_max_raw = int(np.max(obstacle_points['x']))
-        z_min_raw = int(np.min(obstacle_points['z']))  # z 값의 최소 최대
-        z_max_raw = int(np.max(obstacle_points['z']))
-
-        # ✅ 시각화용 원본 좌표 저장
-        original_obstacles.append({
-            "x_min": x_min_raw,
-            "x_max": x_max_raw,
-            "z_min": z_min_raw,
-            "z_max": z_max_raw
-        })
-
-        # 👉 A*용 maze에는 buffer 적용
-        buffer = 5
-        x_min = max(0, x_min_raw - buffer)
-        x_max = min(GRID_SIZE - 1, x_max_raw + buffer)
-        z_min = max(0, z_min_raw - buffer)
-        z_max = min(GRID_SIZE - 1, z_max_raw + buffer)
-
-        # map에 적용. 따로 일반 함수로 빼놔도 좋을 듯...
-        for x in range(x_min, x_max + 1):
-            for z in range(z_min, z_max + 1):
-                if maze[z][x] == 0:  # 이미 마킹된 경우는 생략
-                    maze[z][x] = 1
-    
-
-@app.route('/info', methods=['POST'])
-def info():
-    global maze, original_obstacles
-
-    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-    original_obstacles = []
-
-    data = request.get_json(force=True)
-    if not data:
-        return jsonify({"error": "No JSON received"}), 400
-
-
-    # 여기서부터 수정 코드
-    # 설정... 
-    # channel 12, MinimapChannel 6, Y position 1.65, lidar position: Turret, sdl_uncheck, distance50
-    lidar_data = [
-        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
-        for pt in data.get("lidarPoints", [])
-        if (
-            -1 < pt.get("verticalAngle", 0) < 4 and
-            pt.get("verticalAngle") != 2.045455 and
-            pt.get("isDetected", False) == True
-        )
-    ]
-    
-    if not lidar_data:
-        print("라이다 감지되는 것 없음")
-        return jsonify({"status": "no lidar points"})
-
-    # 라이다 데이터 -> df로 변환...
-    lidar_df = pd.DataFrame(lidar_data, columns=['x', 'z', 'verticalAngle']) 
-    split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
-
-    hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
-    if hill_groups:  # 언덕으로 분류된게 있으면
-        only_obstacle_df = split_lidar_df[~split_lidar_df['line_group'].isin(hill_groups)]  # 언덕으로 분류된 것 죄다 버리기...
-    else:
-        only_obstacle_df = split_lidar_df
-
-    if len(only_obstacle_df) == 0:
-        print("감지되는 장애물 없음")
-        # continue  #  ..?
-        # return jsonify({"status": "no obstacles detected"})  # 끝내기.
-    else:
-        map_obstacle(only_obstacle_df)
-    
-    #여기서부터 수정 끝##############
-
-    try:
-        json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
-        with open(json_path, "w") as f:
-            json.dump(original_obstacles, f, indent=2)
-        print("✅ original_obstacles.json 저장 완료")
-
-        np.save("maze.npy", np.array(maze))
-        np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
-    except Exception as e:
-        print(f"❌ 장애물 저장 실패: {e}")
-
-    return jsonify({"status": "success", "obstacle_clusters": ""})
 
 
 # 서버 실행
