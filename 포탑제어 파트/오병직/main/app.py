@@ -485,12 +485,94 @@ true_hit_ratio = [] # 평가를 위해서 사용했던 변수
 s_time = 0 # 시뮬레이터 시간
 body_x = 0
 
+def map_obstacle(original_obstacles, only_obstacle_df):   
+    for i in only_obstacle_df['line_group'].unique():
+        obstacle_points = only_obstacle_df[only_obstacle_df['line_group'] == i]
+        x_min_raw = int(np.min(obstacle_points['x']))   # x 값의 최소, 최대
+        x_max_raw = int(np.max(obstacle_points['x']))
+        z_min_raw = int(np.min(obstacle_points['z']))  # z 값의 최소 최대
+        z_max_raw = int(np.max(obstacle_points['z']))
+
+        # ✅ 시각화용 원본 좌표 저장
+        original_obstacles.append({
+            "x_min": x_min_raw,
+            "x_max": x_max_raw,
+            "z_min": z_min_raw,
+            "z_max": z_max_raw
+        })
+
+        # 👉 A*용 maze에는 buffer 적용
+        buffer = 10
+        x_min = max(0, x_min_raw - buffer)
+        x_max = min(GRID_SIZE - 1, x_max_raw + buffer)
+        z_min = max(0, z_min_raw - buffer)
+        z_max = min(GRID_SIZE - 1, z_max_raw + buffer)
+
+        # map에 적용. 따로 일반 함수로 빼놔도 좋을 듯...
+        for x in range(x_min, x_max + 1):
+            for z in range(z_min, z_max + 1):
+                if maze[z][x] == 0:  # 이미 마킹된 경우는 생략
+                    maze[z][x] = 1
+
+# 초기할 인덱스 위치 계산(start_row, start_col, end_row, end_col)
+def clamp_range(center, delta = 25, grid_size = 300):  # delta가 buffer 같은 것 
+    start = max(center - delta, 0)
+    end = min(center + delta, grid_size - 1)
+    return start, end
+
+
+# 맵, 지나온 길만 초기화하고 현 위치는 초기화 X
+def initialize_maze(current_pos, maze):
+
+    maintain_start_x, maintain_end_x = clamp_range(current_pos[0]) #, MAINTAIN_NUM, GRID_SIZE)
+    maintain_start_z, maintain_end_z = clamp_range(current_pos[1]) #, MAINTAIN_NUM, GRID_SIZE)
+    # 함수 검증용 print문
+    print("current_pos: ",current_pos)
+    print("maintain_area_z: ", maintain_start_z, "~", maintain_end_z)
+    print("maintain_area_x: ", maintain_start_x, "~", maintain_end_x)
+    
+    old_maze = []
+    for x in range(maintain_start_x, maintain_end_x + 1):
+        row = []
+        for z in range(maintain_start_z, maintain_end_z + 1):
+            row.append(maze[x][z])
+        old_maze.append(row)
+
+    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 0으로 전부 초기화...
+    
+    for r_idx, r in enumerate(range(maintain_start_x, maintain_end_x + 1)): # old_maze에 저장된 부분 넣기
+        for c_idx, c in enumerate(range(maintain_start_z, maintain_end_z + 1)): 
+                maze[r][c] = old_maze[r_idx][c_idx]
+            
+    original_obstacles = []  # 초기화
+    return maze, original_obstacles  # 지나온 길에 대한 장애물 값은 지워진 맵, original_obstacles 도 초기화해서 return 
+ 
+info_func_implement = 0
+how_many_init = 0
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
     global last_bullet_info, true_hit_ratio, s_time, lidar_data, DRIVE_MODE, enemy_pos
     global maze, original_obstacles, body_x
+    global info_func_implement, how_many_init
 
-    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    info_func_implement+=1
+    if info_func_implement == 3:
+        # data = request.get_json(force=True)  # 현위치 데이터로 받아오기
+        pos = data.get('playerPos', {})
+        pos_x = int(pos.get('x', 0))
+        pos_z = int(pos.get('z', 0))
+        current_pos = (pos_x, pos_z)
+
+        if 'x' not in pos or 'z' not in pos:
+            print("현재 위치 좌표를 못 받아옴.")
+        else: 
+            maze, original_obstacles = initialize_maze(current_pos, maze)
+            print("maze 초기화")
+            np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
+        how_many_init+=1
+        info_func_implement = 0
+
+    # maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
     data = request.get_json()
     lidar_data = data.get('lidarPoints', [])
@@ -502,8 +584,8 @@ def get_info():
         (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
         for pt in data.get("lidarPoints", [])
         if (
-            -1 < pt.get("verticalAngle", 0) < 4 and
-            pt.get("verticalAngle") != 2.045455 and
+            4 < pt.get("verticalAngle", 0) < 7 and
+            # pt.get("verticalAngle") != 2.045455 and
             pt.get("isDetected", False) == True
         )
     ]
@@ -526,7 +608,7 @@ def get_info():
         # continue  #  ..?
         # return jsonify({"status": "no obstacles detected"})  # 끝내기.
     else:
-        drive.map_obstacle(maze, original_obstacles, only_obstacle_df)
+        map_obstacle(original_obstacles, only_obstacle_df)
 
     try:
         json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
@@ -603,7 +685,7 @@ def collision():
 #Endpoint called when the episode starts
 @app.route('/init', methods=['GET'])
 def init():
-    global start_distance, DRIVE_MODE, last_bullet_info, enemy_pos
+    global DRIVE_MODE, last_bullet_info, enemy_pos
     global current_yaw, previous_position, target_reached
     current_yaw = INITIAL_YAW
     previous_position = None
@@ -642,4 +724,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5004, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5002, debug=False, use_reloader=False)

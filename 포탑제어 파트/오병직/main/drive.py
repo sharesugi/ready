@@ -165,32 +165,3 @@ def detect_obstacle_and_hill(df):
 
     # print(f"hill_groups: {hill_groups}")
     return hill_groups
-
-def map_obstacle(maze, original_obstacles, only_obstacle_df):   
-    for i in only_obstacle_df['line_group'].unique():
-        obstacle_points = only_obstacle_df[only_obstacle_df['line_group'] == i]
-        x_min_raw = int(np.min(obstacle_points['x']))   # x 값의 최소, 최대
-        x_max_raw = int(np.max(obstacle_points['x']))
-        z_min_raw = int(np.min(obstacle_points['z']))  # z 값의 최소 최대
-        z_max_raw = int(np.max(obstacle_points['z']))
-
-        # ✅ 시각화용 원본 좌표 저장
-        original_obstacles.append({
-            "x_min": x_min_raw,
-            "x_max": x_max_raw,
-            "z_min": z_min_raw,
-            "z_max": z_max_raw
-        })
-
-        # 👉 A*용 maze에는 buffer 적용
-        buffer = 10
-        x_min = max(0, x_min_raw - buffer)
-        x_max = min(GRID_SIZE - 1, x_max_raw + buffer)
-        z_min = max(0, z_min_raw - buffer)
-        z_max = min(GRID_SIZE - 1, z_max_raw + buffer)
-
-        # map에 적용. 따로 일반 함수로 빼놔도 좋을 듯...
-        for x in range(x_min, x_max + 1):
-            for z in range(z_min, z_max + 1):
-                if maze[z][x] == 0:  # 이미 마킹된 경우는 생략
-                    maze[z][x] = 1
