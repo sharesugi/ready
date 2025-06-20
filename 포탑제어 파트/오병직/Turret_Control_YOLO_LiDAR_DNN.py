@@ -94,7 +94,7 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
     }
 
 # 위 두 함수를 사용하여 우리가 필요한 실제 감지된 전차의 좌표를 return 해주는 함수
-def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v, pitch=0.0, roll=0.0):
+def match_yolo_to_lidar(bboxes, lidar_points, image_width, image_height, fov_h, fov_v):
     results = []
     for bbox in bboxes:
         h_angle, v_angle = get_angles_from_yolo_bbox(bbox, image_width, image_height, fov_h, fov_v)
@@ -165,9 +165,7 @@ def detect():
         image_width=IMAGE_WIDTH,
         image_height=IMAGE_HEIGHT,
         fov_h=FOV_HORIZONTAL,
-        fov_v=FOV_VERTICAL,
-        pitch=body['y'],
-        roll=body['z']
+        fov_v=FOV_VERTICAL
     )   
 
     print(f'🗺️ yolo_results : {yolo_results}')

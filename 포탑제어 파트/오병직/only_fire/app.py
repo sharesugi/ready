@@ -1,12 +1,9 @@
-import os, json, time, math
+import math
 from ultralytics import YOLO
 from flask import Flask, request, jsonify
-import pandas as pd
-import numpy as np
 from queue import PriorityQueue
 
 import fire, drive
-
 
 app = Flask(__name__)
 model_yolo = YOLO('./models/best_8s.pt')
@@ -39,27 +36,6 @@ INITIAL_YAW = 0.0  # 초기 YAW 값 - 맨 처음 전차의 방향이 0도이기 
 current_yaw = INITIAL_YAW  # 현재 차체 방향 추정치 -> playerBodyX로 바꾸면 좋겠으나 실패... playerBodyX의 정보를 받아 오는데 딜레이가 걸린다면 지금처럼 current_yaw값 쓰는게 좋다고 함(by GPT)
 previous_position = None  # 이전 위치 (yaw 계산용)
 target_reached = False  # 목표 도달 유무 플래그
-current_angle = 0.0  # 실제 플레이어의 차체 각도 저장용 (degree) -> playerBodyX 받아오는 방법 사용해 볼 것임.
-collision_count = 0  # 충돌 횟수 카운터 추가
-total_distance = 0
-
-# 시각화 관련 부분
-current_position = None
-last_position = None
-position_history = []
-original_obstacles = []  # 원본 장애물 좌표 저장용 (버퍼 없이)
-collision_points = [] # 전역변수에 collision point 추가(충돌 그림에 필요)
-
-# 충돌 없을 때 파일 저장
-with open('collision_points.json', 'w') as f:
-    json.dump({
-        "collision_count": 0,
-        "collision_points": []
-    }, f, indent=2)
-
-# 시간 세는 부분
-start_time = None
-end_time = None
 
 GRID_SIZE = 300  # 맵 크기
 astar_how_many_implement = 0
@@ -198,14 +174,11 @@ len_angle_hist = -1
 
 # 여기 리스트에 cmd 2개를 넣는다
 combined_command_cache = []
-next_group = 1
-new_df = pd.DataFrame()
 @app.route('/get_action', methods=['POST'])
 def get_action():
     global enemy_pos, last_bullet_info, angle_hist, save_time, len_angle_hist, DRIVE_MODE, yolo_results
-    global target_reached, previous_position, current_yaw, current_position, last_position, dest_list, dest_idx
+    global target_reached, previous_position, current_yaw, dest_list, dest_idx
     global body_x
-    global next_group, new_df
 
     data = request.get_json(force=True)
 
@@ -228,9 +201,7 @@ def get_action():
 
     if DRIVE_MODE: # 적 전차를 탐색하는 상태일 때 
         if not target_reached and math.hypot(pos_x - destination[0], pos_z - destination[1]) < 5.0: # 거리 5 미만이면 도착으로 간주
-            target_reached = True  
-            print(f"이동거리: {drive.calculate_actual_path():.3f}")
-            print("✨ 목표 도달: 전차 정지 플래그 설정")
+            target_reached = True 
             
         if target_reached:
             if dest_idx < len(dest_list):
@@ -250,9 +221,6 @@ def get_action():
 
         current_grid = (int(pos_x), int(pos_z))
 
-        #######################################################################
-        # 2 좌표 이동한 후. astar(현좌표, 최종목적지) 함수 실행해서 path 새로 뽑기 반복
-
         if combined_command_cache:
         # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
             cmd = combined_command_cache.pop(0)
@@ -260,20 +228,6 @@ def get_action():
             return jsonify(cmd)
         elif not combined_command_cache:  # 명령어 두 개 다 실행해서 비어있으면
             path = a_star(current_grid, destination)  # 이 때만 astar 실행
-
-            # if path:
-            #     df = pd.DataFrame(path, columns=["x", "z"])
-            #     df["group"] = next_group
-            #     next_group+=1
-        
-            #     os.makedirs("logs", exist_ok=True)  # logs 폴더 없으면 생성
-            #     filepath = "./logs/a_star_path_log.csv"
-        
-            #     # 파일이 이미 있으면 이어쓰기, 없으면 새로 생성
-            #     if os.path.exists(filepath):
-            #         df.to_csv(filepath, mode='a', header=False, index=False)  # header=False로 기존 헤더 유지
-            #     else:
-            #         df.to_csv(filepath, index=False)
 
         # print(f"✅ A* 경로가 {filepath} 에 누적 저장되었습니다.")
         if len(path) > 3:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
@@ -284,8 +238,6 @@ def get_action():
             next_grid = [current_grid]   # 0개면 멈춰라! 도착한거니까!
 
         for i in range(len(next_grid)):  # 두개의 좌표가 맵을 빠져나기지 않는지 확인 # 0, 1
-
-            # next_grid[1]의 회전 각도는 current 가 아니라 next_grid[0]에서 계산해야 맞음 
             base_pos = current_grid if i == 0 else next_grid[i - 1]  
         
             if not drive.is_valid_pos(next_grid[i]):  # 가야하는 곳이 맵 외에 있으면 움직이는거 멈춤
@@ -317,8 +269,6 @@ def get_action():
 
             # 현재 터렛 각도와 목표 각도 차이 계산
             yaw_diff = body_x - turret_x
-
-            print(f'🏹🏹🏹🏹 yaw_diff : {yaw_diff}')
 
             # 각도 차이 보정 (-180 ~ 180)
             if yaw_diff > 180:
@@ -353,21 +303,6 @@ def get_action():
             }
 
             combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
-
-        # 처음 1회 A* 경로 계산_ 출발할 때 구한 A* 경로 시각화용
-        if len(position_history) == 0:
-            path = a_star((int(pos_x), int(pos_z)), destination)  # 현 위치에서 최종 목적지까지 다시 계산
-            df = pd.DataFrame(path, columns=["x", "z"])
-            df.to_csv("a_star_path.csv", index=False)
-
-        # 내 전차의 이동 경로 시각화용
-        if current_grid:
-            last_position = current_grid
-        position_history.append(current_grid)
-        
-        df = pd.DataFrame(position_history, columns=["x", "z"])
-        df.to_csv("tank_path0.csv", index=False)
-
 
         # print문 살짝 수정-희연
         print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})") # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
@@ -491,144 +426,16 @@ true_hit_ratio = [] # 평가를 위해서 사용했던 변수
 s_time = 0 # 시뮬레이터 시간
 body_x = 0
 
-# 초기할 인덱스 위치 계산(start_row, start_col, end_row, end_col)
-def clamp_range(center, delta = 25, grid_size = 300):  # delta가 buffer 같은 것 
-    start = max(center - delta, 0)
-    end = min(center + delta, grid_size - 1)
-    return start, end
-
-
-# 맵, 지나온 길만 초기화하고 현 위치는 초기화 X
-def initialize_maze(current_pos, maze):
-
-    maintain_start_x, maintain_end_x = clamp_range(current_pos[0]) #, MAINTAIN_NUM, GRID_SIZE)
-    maintain_start_z, maintain_end_z = clamp_range(current_pos[1]) #, MAINTAIN_NUM, GRID_SIZE)
-    # 함수 검증용 print문
-    print("current_pos: ",current_pos)
-    print("maintain_area_z: ", maintain_start_z, "~", maintain_end_z)
-    print("maintain_area_x: ", maintain_start_x, "~", maintain_end_x)
-    
-    old_maze = []
-    for x in range(maintain_start_x, maintain_end_x + 1):
-        row = []
-        for z in range(maintain_start_z, maintain_end_z + 1):
-            row.append(maze[x][z])
-        old_maze.append(row)
-
-    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 0으로 전부 초기화...
-    
-    for r_idx, r in enumerate(range(maintain_start_x, maintain_end_x + 1)): # old_maze에 저장된 부분 넣기
-        for c_idx, c in enumerate(range(maintain_start_z, maintain_end_z + 1)): 
-                maze[r][c] = old_maze[r_idx][c_idx]
-            
-    original_obstacles = []  # 초기화
-    return maze, original_obstacles  # 지나온 길에 대한 장애물 값은 지워진 맵, original_obstacles 도 초기화해서 return 
-
-def map_obstacle(original_obstacles, only_obstacle_df):   
-    for i in only_obstacle_df['line_group'].unique():
-        obstacle_points = only_obstacle_df[only_obstacle_df['line_group'] == i]
-        x_min_raw = int(np.min(obstacle_points['x']))   # x 값의 최소, 최대
-        x_max_raw = int(np.max(obstacle_points['x']))
-        z_min_raw = int(np.min(obstacle_points['z']))  # z 값의 최소 최대
-        z_max_raw = int(np.max(obstacle_points['z']))
-
-        # ✅ 시각화용 원본 좌표 저장
-        original_obstacles.append({
-            "x_min": x_min_raw,
-            "x_max": x_max_raw,
-            "z_min": z_min_raw,
-            "z_max": z_max_raw
-        })
-
-        # 👉 A*용 maze에는 buffer 적용
-        buffer = 5
-        x_min = max(0, x_min_raw - buffer)
-        x_max = min(GRID_SIZE - 1, x_max_raw + buffer)
-        z_min = max(0, z_min_raw - buffer)
-        z_max = min(GRID_SIZE - 1, z_max_raw + buffer)
-
-        # map에 적용. 따로 일반 함수로 빼놔도 좋을 듯...
-        for x in range(x_min, x_max + 1):
-            for z in range(z_min, z_max + 1):
-                if maze[z][x] == 0:  # 이미 마킹된 경우는 생략
-                    maze[z][x] = 1
-    
-info_func_implement = 0
-how_many_init = 0
 @app.route('/info', methods=['GET', 'POST'])
 def get_info():
     global last_bullet_info, true_hit_ratio, s_time, lidar_data, DRIVE_MODE, enemy_pos
-    global maze, original_obstacles, body_x
-    global info_func_implement, how_many_init
-
-    # maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    global maze, body_x
 
     data = request.get_json()
-
-    info_func_implement += 1
-    if info_func_implement == 10:
-        # data = request.get_json(force=True)  # 현위치 데이터로 받아오기
-        pos = data.get('playerPos', {})
-        pos_x = int(pos.get('x', 0))
-        pos_z = int(pos.get('z', 0))
-        current_pos = (pos_x, pos_z)
-
-        if 'x' not in pos or 'z' not in pos:
-            print("현재 위치 좌표를 못 받아옴.")
-        else: 
-            maze, original_obstacles = initialize_maze(current_pos, maze)
-            print("maze 초기화")
-            np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
-        how_many_init += 1
-        info_func_implement = 0
- 
     lidar_data = data.get('lidarPoints', [])
     s_time = data.get("s_time", 0)
     body_x = data.get('playerBodyX', 0)
     control = ""
-
-    drive_lidar_data = [
-        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
-        for pt in data.get("lidarPoints", [])
-        if (
-            4 < pt.get("verticalAngle", 0) < 7 and
-           # pt.get("verticalAngle") != 2.045455 and
-            pt.get("isDetected", False) == True
-        )
-    ]
-    if not drive_lidar_data:
-        print("라이다 감지되는 것 없음")
-        return jsonify({"status": "no lidar points"})
-
-    # 라이다 데이터 -> df로 변환...
-    lidar_df = pd.DataFrame(drive_lidar_data, columns=['x', 'z', 'verticalAngle']) 
-    split_lidar_df = drive.split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
-
-    hill_groups = drive.detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
-    if hill_groups:  # 언덕으로 분류된게 있으면
-        only_obstacle_df = split_lidar_df[~split_lidar_df['line_group'].isin(hill_groups)]  # 언덕으로 분류된 것 죄다 버리기...
-    else:
-        only_obstacle_df = split_lidar_df
-
-    if len(only_obstacle_df) == 0:
-        print("감지되는 장애물 없음")
-        # continue  #  ..?
-        # return jsonify({"status": "no obstacles detected"})  # 끝내기.
-    else:
-        # maze = drive.map_obstacle(maze, original_obstacles, only_obstacle_df)
-        map_obstacle(original_obstacles, only_obstacle_df)
-        # drive.map_obstacle(maze, only_obstacle_df)
-
-    try:
-        json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
-        with open(json_path, "w") as f:
-            json.dump(original_obstacles, f, indent=2)
-        print("✅ original_obstacles.json 저장 완료")
-
-        np.save("maze.npy", np.array(maze))
-        np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
-    except Exception as e:
-        print(f"❌ 장애물 저장 실패: {e}")
 
     # 발사된 탄이 어딘가에 떨어졌을 때
     if last_bullet_info:
@@ -667,34 +474,24 @@ def update_obstacle():
 
 @app.route('/collision', methods=['POST']) 
 def collision():
-    global collision_points, collision_count
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No collision data received'}), 400
 
-    d = request.get_json(force=True)
-    p = d.get('position', {})
-    x = p.get('x')
-    z = p.get('z')
+    object_name = data.get('objectName')
+    position = data.get('position', {})
+    x = position.get('x')
+    y = position.get('y')
+    z = position.get('z')
 
-    if x is not None and z is not None:
-        collision_points.append((x, z))
-        collision_count += 1  # 충돌 횟수 증가
+    print(f"💥 Collision Detected - Object: {object_name}, Position: ({x}, {y}, {z})")
 
-        # 저장 파일 구조: 충돌 좌표 목록과 총 횟수 포함
-        save_data = {
-            "collision_count": collision_count,
-            "collision_points": collision_points
-        }
-
-        with open('collision_points.json', 'w') as f:
-            json.dump(save_data, f, indent=2)
-
-        print(f"💥 Collision #{collision_count} at ({x}, {z})")
-
-    return jsonify({'status': 'success', 'collision_count': collision_count})
+    return jsonify({'status': 'success', 'message': 'Collision data received'})
 
 #Endpoint called when the episode starts
 @app.route('/init', methods=['GET'])
 def init():
-    global start_distance, DRIVE_MODE, last_bullet_info, enemy_pos
+    global DRIVE_MODE, last_bullet_info, enemy_pos
     global current_yaw, previous_position, target_reached
     current_yaw = INITIAL_YAW
     previous_position = None

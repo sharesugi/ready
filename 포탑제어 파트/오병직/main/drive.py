@@ -37,6 +37,7 @@ def is_valid_pos(pos, size=GRID_SIZE): # 내 전차 혹은 A* 경로가 300x300 
     return 0 <= x < size and 0 <= z < size
 
 # 이동 거리 구하는 함수(평가용)
+total_distance = 0
 def calculate_actual_path(position_history):
     global total_distance
     
@@ -111,7 +112,7 @@ def detect_obstacle_and_hill(df):
             hill_groups.add(i)
             continue
 
-        print(f"Group {i}: {len(group)} points")
+        # print(f"Group {i}: {len(group)} points")
         
         arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
         dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
@@ -125,10 +126,10 @@ def detect_obstacle_and_hill(df):
 
         if 3 <= len(coords) <= 4:   # 4개에서 3개인데 직선이면...
             if np.all(np.abs(sum_angle) < 1):
-                print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
+                # print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
                 continue
         elif len(coords) <= 5:
-            print("❌ 데이터 부족하고 직선도 아님 → 제외")
+            # print("❌ 데이터 부족하고 직선도 아님 → 제외")
             hill_groups.add(i)
             continue
 
@@ -142,26 +143,28 @@ def detect_obstacle_and_hill(df):
 
     
         if sum_angle == 0 and sharp_turns == 0 and loose_turns == 0:
-            print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
+            # print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
+            continue
             
         # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
         elif sharp_turns == 1  and loose_turns <=1 and (abs(sum_angle) == 90 or abs(sum_angle) == 270):   
-            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
+           # print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
+            continue
             
          # 급하게 꺾이는 구간이 3개 이상이고(전차는 꺾임 구간이 2개라서 혹시 몰라서 임시방편으로...) 
         # and 각도가 느슨하게 꺾이는 것이 3번 이상 발생하면 언덕...
         elif sharp_turns > 1 and loose_turns >=3:  
-            print("급변하는 언덕")
+            # print("급변하는 언덕")
             hill_groups.add(i)
             
         elif sharp_turns and loose_turns:  # 급하게 꺾이는 구간은 없지만 느슨하게 서서히 꺾일 때
-            print("느슨한 언덕")
+            # print("느슨한 언덕")
             hill_groups.add(i)
         else:  
             # 이 부분 추후 수정 필요...
-            print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
+            # print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
             hill_groups.add(i)
-        print()
+        # print()
 
     # print(f"hill_groups: {hill_groups}")
     return hill_groups
