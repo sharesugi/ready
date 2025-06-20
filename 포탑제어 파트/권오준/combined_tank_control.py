@@ -28,7 +28,7 @@ IMAGE_HEIGHT = 1080
 FOV_HORIZONTAL = 47.81061
 FOV_VERTICAL = 28
 
-MODEL_PATH = "turret_final/best_dnn_model.h5"
+MODEL_PATH = "best_dnn_model.h5"
 XGB_PATH = "best_xgb_model.pkl"
 SCALER_PATH = "scaler.pkl"
 POLY_PATH = "poly_transformer.pkl"
