@@ -136,3 +136,10 @@ def find_angle_for_distance_dy_xgb(distance, dy):
     y_pred_angle = np.rad2deg(np.arctan2(y_pred[:, 0], y_pred[:, 1]))
 
     return float(y_pred_angle)
+
+def distance_3d(a, b):
+    return math.sqrt(
+        (a['x'] - b['x'])**2 +
+        (a['y'] - b['y'])**2 +
+        (a['z'] - b['z'])**2
+    )
