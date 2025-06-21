@@ -24,12 +24,12 @@ GRID_SIZE = 300  # 맵 크기
 maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 장애물 맵
 
 # 내 전차 시작 위치
-start_x = 20
-start_z = 50
+start_x = 55
+start_z = 55
 start = (start_x, start_z)
 
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-dest_list = [(260, 46), (250, 240), (55, 230), (20, 50)]
+dest_list = [(245, 55), (245, 245), (55, 245), (55, 80)]
 dest_idx = 0
 
 INITIAL_YAW = 0.0  # 초기 YAW 값 - 맨 처음 전차의 방향이 0도이기 때문에 0.0 줌. 이를  
@@ -130,7 +130,7 @@ def detect():
     current_bboxes = []
 
     for i, box in enumerate(detections):
-        if box[4] >= 0.90:
+        if box[4] >= 0.80:
             class_id = int(box[5])
             if class_id == 3:
                 is_tank = True
@@ -142,7 +142,7 @@ def detect():
 
             if class_id in target_classes:
                 filtered_results.append({
-                    'className': target_classes[class_id] + str(i),
+                    'className': target_classes[class_id],
                     'bbox': [float(coord) for coord in box[:4]],
                     'confidence': float(box[4]),
                     'color': '#00FF00',
@@ -223,8 +223,6 @@ def detect():
         DRIVE_MODE = False
 
     return jsonify(filtered_results)
-
-
 
 # 아래 세 변수 모두 사격 불가능한 각도 판별할 때 사용하는 변수
 angle_hist = []
@@ -595,4 +593,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5005, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5007, debug=False, use_reloader=False)
