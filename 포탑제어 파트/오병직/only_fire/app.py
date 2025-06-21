@@ -125,12 +125,12 @@ def detect():
     detections = results[0].boxes.data.cpu().numpy()
 
     is_tank = False
-    target_classes = {2: "human", 3: "tank"}
+    target_classes = {3: "tank"}
     filtered_results = []
     current_bboxes = []
 
     for i, box in enumerate(detections):
-        if box[4] >= 0.80:
+        if box[4] >= 0.70:
             class_id = int(box[5])
             if class_id == 3:
                 is_tank = True
