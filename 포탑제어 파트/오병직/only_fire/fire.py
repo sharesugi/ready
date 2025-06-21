@@ -36,7 +36,7 @@ def find_lidar_cluster_center_adaptive(lidar_points, h_angle, v_angle,
                                        bbox_width_ratio, bbox_height_ratio,
                                        fov_horizontal=47.81061,
                                        fov_vertical=28.0):
-    BOX_THRESHOLD = 0.8
+    BOX_THRESHOLD = 0.5
 
     # 바운딩박스 크기에 따라 허용 각도 조정
     h_angle_tol = bbox_width_ratio * fov_horizontal * BOX_THRESHOLD

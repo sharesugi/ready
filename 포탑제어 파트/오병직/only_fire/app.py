@@ -40,6 +40,11 @@ target_reached = False  # 목표 도달 유무 플래그
 GRID_SIZE = 300  # 맵 크기
 astar_how_many_implement = 0
 
+enemy_pos_locked = False
+locked_enemy_id = None
+lock_frame_counter = 0  # 프레임 카운트
+LOCK_TIMEOUT = 600       # 최대 60 프레임 (예: 2초)
+
 # A* 알고리즘 관련 클래스 및 함수 정의
 class Node:
     def __init__(self, position, parent=None):
@@ -107,6 +112,7 @@ lidar_data = [] # /info 에서 가져오는 라이다 데이터 저장
 @app.route('/detect', methods=['POST'])
 def detect():
     global lidar_data, enemy_pos, DRIVE_MODE, yolo_results
+    global enemy_pos_locked, locked_enemy_id, lock_frame_counter
 
     image = request.files.get('image')
     if not image:
@@ -121,17 +127,22 @@ def detect():
     is_tank = False
     target_classes = {2: "human", 3: "tank"}
     filtered_results = []
-    current_bboxes = [] # 인식된 전차의 바운딩 박스 좌표를 저장하기 위한 리스트
-    for box in detections:
-        if box[4] >= 0.90: # confidence가 0.9 이상인 것만 인식
+    current_bboxes = []
+
+    for i, box in enumerate(detections):
+        if box[4] >= 0.90:
             class_id = int(box[5])
-            if class_id == 3: # 인식된 객체가 전차라면
+            if class_id == 3:
                 is_tank = True
-                current_bboxes.append({'x1': float(box[0]), 'y1': float(box[1]), 'x2': float(box[2]), 'y2': float(box[3])})
+                current_bboxes.append({
+                    'id': i,
+                    'x1': float(box[0]), 'y1': float(box[1]),
+                    'x2': float(box[2]), 'y2': float(box[3])
+                })
 
             if class_id in target_classes:
                 filtered_results.append({
-                    'className': target_classes[class_id],
+                    'className': target_classes[class_id] + str(i),
                     'bbox': [float(coord) for coord in box[:4]],
                     'confidence': float(box[4]),
                     'color': '#00FF00',
@@ -139,33 +150,77 @@ def detect():
                     'updateBoxWhileMoving': True
                 })
 
-    # current_bboxes에 저장되어있는 현재 인식된 전차들의 바운딩 박스 좌표로 그 전차의 실제 좌표값 가져오기
-    yolo_results = fire.match_yolo_to_lidar(
-        bboxes=current_bboxes,
-        lidar_points=lidar_data,
-        image_width=IMAGE_WIDTH,
-        image_height=IMAGE_HEIGHT,
-        fov_h=FOV_HORIZONTAL,
-        fov_v=FOV_VERTICAL
-    )   
+    # 🔒 타겟 락온
+    if not enemy_pos_locked:
+        # YOLO + LiDAR 매칭
+        yolo_results = fire.match_yolo_to_lidar(
+            bboxes=current_bboxes,
+            lidar_points=lidar_data,
+            image_width=IMAGE_WIDTH,
+            image_height=IMAGE_HEIGHT,
+            fov_h=FOV_HORIZONTAL,
+            fov_v=FOV_VERTICAL
+        )
+
+        print(f'🗺️ yolo_results : {yolo_results}')
+
+        # 결과 확인
+        for i, r in enumerate(yolo_results):
+            enemy_pos['x'] = r['matched_lidar_pos'].get('x', 0)
+            enemy_pos['y'] = r['matched_lidar_pos'].get('y', 0)
+            enemy_pos['z'] = r['matched_lidar_pos'].get('z', 0)
+            print(f"탐지된 전차 {i+1}:")
+            print(f"  바운딩 박스: {r['bbox']}")
+            print(f"  LiDAR 좌표: {r['matched_lidar_pos']}")
+            print(f"  거리: {r['distance']:.2f}m")
+            print()
+
+        closest_result = None
+        min_distance = 150
+        for idx, r in enumerate(yolo_results):
+            if r['distance'] < min_distance:
+                min_distance = r['distance']
+                closest_result = r
+                locked_enemy_id = idx
+
+        if closest_result:
+            enemy_pos = {
+                'x': closest_result['matched_lidar_pos'].get('x', 0),
+                'y': closest_result['matched_lidar_pos'].get('y', 0),
+                'z': closest_result['matched_lidar_pos'].get('z', 0)
+            }
+            enemy_pos_locked = True
+            lock_frame_counter = 0
+            print(f"🔒 Target locked to enemy ID {locked_enemy_id}")
+
+    else:
+        # 🔄 락된 대상 계속 추적
+        lock_frame_counter += 1
+        if locked_enemy_id is not None and locked_enemy_id < len(yolo_results):
+            locked = yolo_results[locked_enemy_id]
+            enemy_pos = {
+                'x': locked['matched_lidar_pos'].get('x', 0),
+                'y': locked['matched_lidar_pos'].get('y', 0),
+                'z': locked['matched_lidar_pos'].get('z', 0)
+            }
+        else:
+            print(f"⚠️ Locked ID {locked_enemy_id} 유효하지 않음 → 해제")
+            enemy_pos_locked = False
+            locked_enemy_id = None
+            lock_frame_counter = 0
+
+        # ⏱️ 락 유지 시간 초과 시 해제
+        if lock_frame_counter > LOCK_TIMEOUT:
+            print("⏲️ Lock timeout → 해제")
+            enemy_pos_locked = False
+            locked_enemy_id = None
+            lock_frame_counter = 0
 
     if is_tank and yolo_results and yolo_results[0]['distance'] <= 100:
         DRIVE_MODE = False
 
-    print(f'🗺️ yolo_results : {yolo_results}')
-
-    # 결과 확인
-    for i, r in enumerate(yolo_results):
-        enemy_pos['x'] = r['matched_lidar_pos'].get('x', 0)
-        enemy_pos['y'] = r['matched_lidar_pos'].get('y', 0)
-        enemy_pos['z'] = r['matched_lidar_pos'].get('z', 0)
-        print(f"탐지된 전차 {i+1}:")
-        print(f"  바운딩 박스: {r['bbox']}")
-        print(f"  LiDAR 좌표: {r['matched_lidar_pos']}")
-        print(f"  거리: {r['distance']:.2f}m")
-        print()
-
     return jsonify(filtered_results)
+
 
 # 아래 세 변수 모두 사격 불가능한 각도 판별할 때 사용하는 변수
 angle_hist = []
@@ -367,12 +422,12 @@ def get_action():
 
         # 최소 가중치 0.01 설정, 최대 1.0 제한
         def calc_yaw_weight(diff):
-            w = min(max(abs(diff) / 30, 0.01), 1.0)  # 30도 내외로 가중치 조절 예시
+            w = min(max(abs(diff) / 30, 0.01), 5.0)  # 30도 내외로 가중치 조절 예시
             return w
         
         # 최소 가중치 0.1 설정, 최대 1.0 제한
         def calc_pitch_weight(diff):
-            w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
+            w = min(max(abs(diff) / 30, 0.1), 5.0)  # 30도 내외로 가중치 조절 예시
             return w
 
         # 위 두 함수에서 최소 가중치를 낮게 할수록 조준 속도는 낮아지지만 정밀 조준 가능
@@ -415,11 +470,19 @@ last_bullet_info = {}
 
 @app.route('/update_bullet', methods=['POST'])
 def update_bullet():
-    global last_bullet_info
-    # 발사한 탄이 지형 / 전차에 떨어 졌는지 저장해주는 변수
+    global last_bullet_info, enemy_pos_locked, locked_enemy_id, lock_frame_counter
     last_bullet_info = request.get_json()
     print("💥 탄 정보 갱신됨:", last_bullet_info)
+
+    # 🔓 적중 시 lock 해제
+    if last_bullet_info.get('hit', False):
+        print("🎯 적중 확인 → 락 해제")
+        enemy_pos_locked = False
+        locked_enemy_id = None
+        lock_frame_counter = 0
+
     return jsonify({"yolo_results": "ok"})
+
 
 enemy_pos = {} # 적 전차의 위치
 true_hit_ratio = [] # 평가를 위해서 사용했던 변수
@@ -508,9 +571,9 @@ def init():
         "blStartX": start_x, 
         "blStartY": 10, 
         "blStartZ": start_z,
-        "rdStartX": 160, 
+        "rdStartX": 120, 
         "rdStartY": 0, 
-        "rdStartZ": 260,
+        "rdStartZ": 50,
         "trackingMode": True,
         "detactMode": True,
         "logMode": True,
