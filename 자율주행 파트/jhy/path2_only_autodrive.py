@@ -39,9 +39,12 @@ maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 장애물 �
 start_x = 20
 start_z = 50
 start = (start_x, start_z)
-# 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-destination_x = 250 # 기존에는 destination과 적 전차 위치를 똑같이 줬으나, LiDAR로 물체를 감지할 경우 적 전차도 감지해서 장애물이라 생각하고 목표에 끝까지 도달을 안함. 그래서 이제부터 따로 줌.
-destination_z = 280
+# 최종 목적지 위치 - 적 전차는 이 위치에 없음
+
+dest_list = [(260, 46), (228,34),(235,225),(250, 240), (220, 50),(55, 230), (20, 50)]
+
+destination_x = dest_list[1][0] 
+destination_z = dest_list[1][1]
 destination = (destination_x, destination_z)
 
 # 238, 40
@@ -144,7 +147,7 @@ def detect_obstacle_and_hill(df):
             hill_groups.add(i)
             continue
 
-        print(f"Group {i}: {len(group)} points")
+        # print(f"Group {i}: {len(group)} points")
         
         arr = np.array(no_dup_coords)  # 차이 계산을 위해서 리스트로 풀어줌.
         dx = np.diff(arr[:, 0])        # x 값들만 뽑아서 차이 계산
@@ -158,10 +161,10 @@ def detect_obstacle_and_hill(df):
 
         if 3 <= len(coords) <= 4:   # 4개에서 3개인데 직선이면...
             if np.all(np.abs(sum_angle) < 1):
-                print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
+                # print("⚠️ small wall (데이터 부족하지만 직선)")  # 소형벽
                 continue
         elif len(coords) <= 5:
-            print("❌ 데이터 부족하고 직선도 아님 → 제외")
+            # print("❌ 데이터 부족하고 직선도 아님 → 제외")
             hill_groups.add(i)
             continue
 
@@ -175,26 +178,27 @@ def detect_obstacle_and_hill(df):
 
     
         if sum_angle == 0 and sharp_turns == 0 and loose_turns == 0:
-            print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
+            # print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
+            continue
             
         # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
         elif sharp_turns == 1  and loose_turns <=1 and (abs(sum_angle) == 90 or abs(sum_angle) == 270):   
-            print(f"ㄱ 장애물_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
-            
+            print("ㄱ 장애물")  #_loose_turns : {loose_turns}, sum_angle: {sum_angle}, sharp_turns: {sharp_turns}")
+            continue
          # 급하게 꺾이는 구간이 3개 이상이고(전차는 꺾임 구간이 2개라서 혹시 몰라서 임시방편으로...) 
         # and 각도가 느슨하게 꺾이는 것이 3번 이상 발생하면 언덕...
         elif sharp_turns > 1 and loose_turns >=3:  
-            print("급변하는 언덕")
+            print("언덕")
             hill_groups.add(i)
             
         elif sharp_turns and loose_turns:  # 급하게 꺾이는 구간은 없지만 느슨하게 서서히 꺾일 때
-            print("느슨한 언덕")
+            print("언덕")
             hill_groups.add(i)
         else:  
             # 이 부분 추후 수정 필요...
-            print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
+            # print(f"분류안함(언덕)_sum_angle: {sum_angle}, sharp_turns: {sharp_turns}, loose_turns: {loose_turns}")
             hill_groups.add(i)
-        print()
+        # print()
 
     # print(f"hill_groups: {hill_groups}")
     return hill_groups
@@ -218,7 +222,7 @@ def map_obstacle(only_obstacle_df):
         })
 
         # 👉 A*용 maze에는 buffer 적용
-        buffer = 5
+        buffer = 10
         x_min = max(0, x_min_raw - buffer)
         x_max = min(GRID_SIZE - 1, x_max_raw + buffer)
         z_min = max(0, z_min_raw - buffer)
@@ -231,36 +235,80 @@ def map_obstacle(only_obstacle_df):
                     maze[z][x] = 1
 
 
-def initialize_maze(grid_size):
-    maze = [[0 for _ in range(grid_size)] for _ in range(grid_size)]
-    original_obstacles = []
-    return maze, original_obstacles
+# 초기할 인덱스 위치 계산(start_row, start_col, end_row, end_col)
+def clamp_range(center, delta = 25, grid_size = 300):  # delta가 buffer 같은 것 
+    start = max(center - delta, 0)
+    end = min(center + delta, grid_size - 1)
+    return start, end
 
+
+# 맵, 지나온 길만 초기화하고 현 위치는 초기화 X
+def initialize_maze(current_pos, maze):
+
+    maintain_start_x, maintain_end_x = clamp_range(current_pos[0]) #, MAINTAIN_NUM, GRID_SIZE)
+    maintain_start_z, maintain_end_z = clamp_range(current_pos[1]) #, MAINTAIN_NUM, GRID_SIZE)
+    # 함수 검증용 print문
+    # print("current_pos: ",current_pos)
+    # print("maintain_area_z: ", maintain_start_z, "~", maintain_end_z)
+    # print("maintain_area_x: ", maintain_start_x, "~", maintain_end_x)
+    
+    old_maze = []
+    for x in range(maintain_start_x, maintain_end_x + 1):
+        row = []
+        for z in range(maintain_start_z, maintain_end_z + 1):
+            row.append(maze[x][z])
+        old_maze.append(row)
+
+    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 0으로 전부 초기화...
+    
+    for r_idx, r in enumerate(range(maintain_start_x, maintain_end_x + 1)): # old_maze에 저장된 부분 넣기
+        for c_idx, c in enumerate(range(maintain_start_z, maintain_end_z + 1)): 
+                maze[r][c] = old_maze[r_idx][c_idx]
+            
+    original_obstacles = []  # 초기화
+    return maze, original_obstacles  # 지나온 길에 대한 장애물 값은 지워진 맵, original_obstacles 도 초기화해서 return 
+
+info_func_implement = 0
+how_many_init = 0
 @app.route('/info', methods=['POST'])
 def info():
     global maze, original_obstacles
-
-    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-    original_obstacles = []
-    # maze = initialize_maze()
+    global info_func_implement, how_many_init
 
     data = request.get_json(force=True)
     if not data:
         return jsonify({"error": "No JSON received"}), 400
 
+        # maze
+    info_func_implement+=1
+    if info_func_implement == 3:
+        # data = request.get_json(force=True)  # 현위치 데이터로 받아오기
+        pos = data.get('playerPos', {})
+        pos_x = int(pos.get('x', 0))
+        pos_z = int(pos.get('z', 0))
+        current_pos = (pos_x, pos_z)
+
+        if 'x' not in pos or 'z' not in pos:
+            print("현재 위치 좌표를 못 받아옴.")
+        else: 
+            maze, original_obstacles = initialize_maze(current_pos, maze)
+            # print("maze 초기화")
+            # np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
+        how_many_init+=1
+        info_func_implement = 0
+
 
     # 여기서부터 수정 코드
     # 설정... 
-    # channel 12, MinimapChannel 6, Y position 1.65, lidar position: Turret, sdl_uncheck, distance50
+    # channel 45, MinimapChannel -, Y position 1.61, lidar position: Turret, sdl -, distance 110
     lidar_data = [
         (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
         for pt in data.get("lidarPoints", [])
         if (
-            4 < pt.get("verticalAngle", 0) < 7 and
+             2 < pt.get("verticalAngle", 0) < 7 and
            # pt.get("verticalAngle") != 2.045455 and
             pt.get("isDetected", False) == True
-        )
-    ]
+        )]
     
     if not lidar_data:
         print("라이다 감지되는 것 없음")
@@ -277,9 +325,9 @@ def info():
         only_obstacle_df = split_lidar_df
 
     if len(only_obstacle_df) == 0:
-        print("감지되는 장애물 없음")
+        # print("감지되는 장애물 없음")
         # continue  #  ..?
-        # return jsonify({"status": "no obstacles detected"})  # 끝내기.
+        return jsonify({"status": "no obstacles detected"})  # 끝내기.
     else:
         map_obstacle(only_obstacle_df)
     
@@ -289,7 +337,7 @@ def info():
         json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
         with open(json_path, "w") as f:
             json.dump(original_obstacles, f, indent=2)
-        print("✅ original_obstacles.json 저장 완료")
+        # print("✅ original_obstacles.json 저장 완료")
 
         np.save("maze.npy", np.array(maze))
         np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
@@ -390,7 +438,7 @@ def is_obstacle_ahead(pos, yaw, maze, radius=30):
         nz = int(round(z + dz * step))
         if 0 <= nx < GRID_SIZE and 0 <= nz < GRID_SIZE:
             if maze[nz][nx] == 1:
-                print(f"⚠️ 전방 장애물 감지: ({nx},{nz})")
+                # print(f"⚠️ 전방 장애물 감지: ({nx},{nz})")
                 return True
     return False
 
@@ -413,8 +461,8 @@ def init():
     config = {
         "startMode": "start",
         "blStartX": start_x, "blStartY": 10, "blStartZ": start_z,
-        "rdStartX": 160, "rdStartY": 10, "rdStartZ": 260,
-        "trackingMode": False, "detectMode": False, "logMode": False,
+        "rdStartX": 160, "rdStartY": 0, "rdStartZ": 260,
+        "trackingMode": True, "detectMode": False, "logMode": True,
         "enemyTracking": False, "saveSnapshot": False,
         "saveLog": False, "saveLidarData": False, "lux": 30000
     }
@@ -476,6 +524,7 @@ def get_action():
         
     if target_reached:
         stop_cmd = {k: {'command': 'STOP', 'weight': 1.0} for k in ['moveWS', 'moveAD']}
+         # maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         return jsonify(stop_cmd)
 
     if previous_position is not None:
@@ -494,13 +543,22 @@ def get_action():
     # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
         cmd = combined_command_cache.pop(0)
         # print(f"👊두번째 명령어 실행_cmd : {cmd}")
+        print(f"🚀 cmd 1개 {cmd}")
         return jsonify(cmd)
     elif not combined_command_cache: #or combined_command_cache is None:  # 비어있다면 = 명령어 두개 다 실행했다면, 이동 
         # print("combined_command_cache 비어있어서 a_star 실행해요...")
         path = a_star(current_grid, destination)  
+        # a_star 경로 CSV로 저장
+        if path:
+            df = pd.DataFrame(path, columns=["x", "z"])
+            os.makedirs("logs", exist_ok=True)  # logs 디렉토리 없으면 생성
+            df.to_csv("logs/a_star_path_log.csv", index=False)
+            # print("✅ A* 경로가 logs/a_star_path_log.csv 에 저장되었습니다.")
+        else:
+            print("❌ A* 경로가 비어 있어 저장하지 않았습니다.")
     
     if len(path) > 3:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
-        next_grid = path[1:4]  # 두번째 좌표 참조
+        next_grid = path[1:4]  # 3개 좌표 참조
         # print(f"👊👊next_grid가 두개예요: {next_grid}👊👊")
     elif len(path) > 1:          # 최종목적지까지 2개 이하의 좌표가 남았으면 
         next_grid = [path[1]]      # 한개씩 참조  
@@ -512,7 +570,7 @@ def get_action():
         # next_grid[1]의 회전 각도는 current 가 아니라 next_grid[0]에서 게산해야 맞음 
         base_pos = current_grid if i == 0 else next_grid[i - 1]  
 
-        print(f"next_grid: {next_grid[i]}")
+        # print(f"next_grid: {next_grid[i]}")
         if not is_valid_pos(next_grid[i]):  # 가야하는 곳이 맵 외에 있으면 움직이는거 멈춤
             stop_cmd = {k: {'command': '', 'weight': 0.0} for k in ['moveWS', 'moveAD']}
             stop_cmd['fire'] = False
@@ -579,9 +637,9 @@ def get_action():
     # print문 살짝 수정-희연
     print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})")
     # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
-    print(f"🚀 cmd 2개 {combined_command_cache}")
+    # print(f"🚀 cmd 3개 {combined_command_cache}")
     cmd = combined_command_cache.pop(0)
-    # print(f"cmd 하나만 : {cmd}")
+    print(f"cmd 1개_ : {cmd}")
     return jsonify(cmd)
 
 @app.route('/detect', methods=['POST'])
@@ -688,7 +746,7 @@ def collision():
 # 서버 실행
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=3000)
+        app.run(host='0.0.0.0', port=4000)
     except KeyboardInterrupt:
         print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
     finally:
