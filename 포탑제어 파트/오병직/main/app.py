@@ -27,12 +27,12 @@ GRID_SIZE = 300  # 맵 크기
 maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 장애물 맵
 
 # 내 전차 시작 위치
-start_x = 20
-start_z = 50
+start_x = 5
+start_z = 75
 start = (start_x, start_z)
 
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
-dest_list = [(260, 46), (250, 240), (55, 230), (20, 50)]
+dest_list = [(257, 92), (225, 275)]
 dest_idx = 0
 
 INITIAL_YAW = 0.0  # 초기 YAW 값 - 맨 처음 전차의 방향이 0도이기 때문에 0.0 줌. 이를  
@@ -154,7 +154,7 @@ def detect():
     current_bboxes = []
 
     for i, box in enumerate(detections):
-        if box[4] >= 0.80:
+        if box[4] >= 0.85:
             class_id = int(box[5])
             if class_id == 3:
                 is_tank = True
@@ -245,19 +245,6 @@ def detect():
 
     if is_tank and yolo_results and enemy_pos_locked:
         DRIVE_MODE = False
-
-    return jsonify(filtered_results)
-
-    # 결과 확인
-    for i, r in enumerate(yolo_results):
-        enemy_pos['x'] = r['matched_lidar_pos'].get('x', 0)
-        enemy_pos['y'] = r['matched_lidar_pos'].get('y', 0)
-        enemy_pos['z'] = r['matched_lidar_pos'].get('z', 0)
-        print(f"탐지된 전차 {i+1}:")
-        print(f"  바운딩 박스: {r['bbox']}")
-        print(f"  LiDAR 좌표: {r['matched_lidar_pos']}")
-        print(f"  거리: {r['distance']:.2f}m")
-        print()
 
     return jsonify(filtered_results)
 
@@ -507,7 +494,7 @@ def get_action():
         
         # 최소 가중치 0.1 설정, 최대 1.0 제한
         def calc_pitch_weight(diff):
-            w = min(max(abs(diff) / 30, 0.1), 1.0)  # 30도 내외로 가중치 조절 예시
+            w = min(max(abs(diff) / 10, 0.1), 3.0)  # 30도 내외로 가중치 조절 예시
             return w
 
         # 위 두 함수에서 최소 가중치를 낮게 할수록 조준 속도는 낮아지지만 정밀 조준 가능
@@ -590,11 +577,9 @@ def initialize_maze(current_pos, maze):
         for z in range(maintain_start_z, maintain_end_z + 1):
             row.append(maze[x][z])
         old_maze.append(row)
-
-    maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 0으로 전부 초기화...
     
     for r_idx, r in enumerate(range(maintain_start_x, maintain_end_x + 1)): # old_maze에 저장된 부분 넣기
-        for c_idx, c in enumerate(range(maintain_start_z, maintain_end_z + 1)): 
+        for c_idx, c in enumerate(range(maintain_start_z, maintain_end_z + 1)):
                 maze[r][c] = old_maze[r_idx][c_idx]
             
     original_obstacles = []  # 초기화
@@ -667,7 +652,7 @@ def get_info():
         (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
         for pt in data.get("lidarPoints", [])
         if (
-            4 < pt.get("verticalAngle", 0) < 7 and
+            2 < pt.get("verticalAngle", 0) < 7 and
            # pt.get("verticalAngle") != 2.045455 and
             pt.get("isDetected", False) == True
         )
@@ -771,7 +756,8 @@ def collision():
 @app.route('/init', methods=['GET'])
 def init():
     global start_distance, DRIVE_MODE, last_bullet_info, enemy_pos
-    global current_yaw, previous_position, target_reached
+    global current_yaw, previous_position, target_reached, maze
+
     current_yaw = INITIAL_YAW
     previous_position = None
     target_reached = False
@@ -809,4 +795,4 @@ def start():
     return jsonify({"control": ""})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5005, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
