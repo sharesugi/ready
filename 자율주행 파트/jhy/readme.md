@@ -1,5 +1,21 @@
 [희연 코드]   
 코드를 직접 돌려보고 싶으면 path2_only_autodrive.py 파일을 사용!  
+
+### 0625
+- 라이다 설정: interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: -     max_distance: 110     lidar_position: turret
+- astar 실행할 때만 라이더 값 가져오게 변경
+   - 기존 코드: 0.3초마다 가져와서 수시로 맵을 갱신함.
+   - 0.3초 안에 전차가 움직인다해도 어차피 주변 환경은 크게 바뀌는 것이 없으니 0.3초마다 데이터를 받아오면 중복 데이터가 심해서 필요 없다고 판단
+   - 장점: 동일 장애물의 중복으로 받아오는게 줄어듬 + 전차 이동시 장애물을 훨씬 더 잘 피함 
+
+### 062?
+- 라이다 설정: interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: -     max_distance: 110     lidar_position: turret
+- 주변 제외 나머지 구역은 초기화하는 함수 추가: clamp_range 함수, initialize_maze 함수
+  - what: 전차 현 위치를 실시간으로 받아와서 그 주위를 제외하고는 맵을 초기화한다.
+  - when: init 함수 3번 실행할 때 마다, 위 방식으로 초기화
+  - 이렇게 한 이유: 1. 맵을 초기화를 안 하면 장애물이 꽉 찼다고 떠서 전차가 갈 길을 잃는다
+                   2. 그래서 초기화를 하는 코드가 한 줄 있었는데, 라이다 데이터를 받아올 때마다 맵의 전체를 초기화해서 비효율적이라고 판단
+
 ### 0619
 - 라이다 설정: interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: -     max_distance: 110     lidar_position: turret
 - info 함수에서 라이다 가져오는 조건값 수정
