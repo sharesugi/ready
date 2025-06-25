@@ -1,12 +1,14 @@
 [희연 코드]   
-코드를 직접 돌려보고 싶으면 path2_only_autodrive.py 파일을 사용!  
+코드를 직접 돌려보고 싶으면 path3_only_autodrive.py 파일을 사용!  
 
 ### 0625
 - 라이다 설정: interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: -     max_distance: 110     lidar_position: turret
 - astar 실행할 때만 라이더 값 가져오게 변경
    - 기존 코드: 0.3초마다 가져와서 수시로 맵을 갱신함.
    - 0.3초 안에 전차가 움직인다해도 어차피 주변 환경은 크게 바뀌는 것이 없으니 0.3초마다 데이터를 받아오면 중복 데이터가 심해서 필요 없다고 판단
-   - 장점: 동일 장애물의 중복으로 받아오는게 줄어듬 + 전차 이동시 장애물을 훨씬 더 잘 피함 
+   - 장점: 동일 장애물의 중복으로 받아오는게 줄어듬 + 전차 이동시 장애물을 훨씬 더 잘 피함
+- 파일 이름 변경
+  - path2_only_autodrive.py -> path3_only_autodrive.py
 
 ### 062?
 - 라이다 설정: interval time:0.3   Ypos: 1.65   Channel: 45      minimapChannel: -     max_distance: 110     lidar_position: turret
