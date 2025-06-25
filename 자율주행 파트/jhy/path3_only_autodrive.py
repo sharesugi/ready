@@ -1,3 +1,5 @@
+# 0625 astar 실행할 때만 라이더 값 가져오게 (0.3초마다 가져올 필요가 없어서)
+# 주변 제외 나머지 구역은 초기화하는 함수 추가: clamp_range 함수, initialize_maze 함수
 # 0619_ 가져오는 라이더 설정값 변경, info 함수와 info 함수가 쓰는 함수들 위로 가져옴, path 3로 바꿔봄: 일단 적용해보니 부딫히는건 3번중 한번꼴(거의 스치듯이 부딫힘)
 # 라이다 고정 설정(포격팀과 통일한)_ interval:0.3   Ypos: 1.61   Channel: 45      minimapChannel: -    max_distance: 110     lidar_position: turret
 # 0614_ path 2 추가 
@@ -36,12 +38,13 @@ GRID_SIZE = 300  # 맵 크기
 maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 장애물 맵
 
 # 내 전차 시작 위치
+# 60 20/ 20, 50
 start_x = 20
-start_z = 50
+start_z = 20
 start = (start_x, start_z)
 # 최종 목적지 위치 - 적 전차는 이 위치에 없음
 
-dest_list = [(260, 46), (228,34),(235,225),(250, 240), (220, 50),(55, 230), (20, 50)]
+dest_list = [(260, 46), (140,262),(235,225),(228,34),(250, 240), (220, 50),(55, 230), (20, 50)]
 
 destination_x = dest_list[1][0] 
 destination_z = dest_list[1][1]
@@ -178,7 +181,7 @@ def detect_obstacle_and_hill(df):
 
     
         if sum_angle == 0 and sharp_turns == 0 and loose_turns == 0:
-            # print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
+            print(f"ㅡ ㅣ 장애물_ len(coords): {len(coords)}")
             continue
             
         # 대신 sum_angle이 0은 아님,...   // and abs(sum_angle) == 90   이거 270이 될 수도 있음
@@ -274,77 +277,83 @@ how_many_init = 0
 def info():
     global maze, original_obstacles
     global info_func_implement, how_many_init
+    global three_moved
 
-    data = request.get_json(force=True)
-    if not data:
-        return jsonify({"error": "No JSON received"}), 400
-
-        # maze
-    info_func_implement+=1
-    if info_func_implement == 3:
-        # data = request.get_json(force=True)  # 현위치 데이터로 받아오기
-        pos = data.get('playerPos', {})
-        pos_x = int(pos.get('x', 0))
-        pos_z = int(pos.get('z', 0))
-        current_pos = (pos_x, pos_z)
-
-        if 'x' not in pos or 'z' not in pos:
-            print("현재 위치 좌표를 못 받아옴.")
-        else: 
-            maze, original_obstacles = initialize_maze(current_pos, maze)
-            # print("maze 초기화")
-            # np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
-        how_many_init+=1
-        info_func_implement = 0
-
-
-    # 여기서부터 수정 코드
-    # 설정... 
-    # channel 45, MinimapChannel -, Y position 1.61, lidar position: Turret, sdl -, distance 110
-    lidar_data = [
-        (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
-        for pt in data.get("lidarPoints", [])
-        if (
-             2 < pt.get("verticalAngle", 0) < 7 and
-           # pt.get("verticalAngle") != 2.045455 and
-            pt.get("isDetected", False) == True
-        )]
+    if three_moved:
+        data = request.get_json(force=True)
+        if not data:
+            return jsonify({"error": "No JSON received"}), 400
     
-    if not lidar_data:
-        print("라이다 감지되는 것 없음")
-        return jsonify({"status": "no lidar points"})
-
-    # 라이다 데이터 -> df로 변환...
-    lidar_df = pd.DataFrame(lidar_data, columns=['x', 'z', 'verticalAngle']) 
-    split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
-
-    hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
-    if hill_groups:  # 언덕으로 분류된게 있으면
-        only_obstacle_df = split_lidar_df[~split_lidar_df['line_group'].isin(hill_groups)]  # 언덕으로 분류된 것 죄다 버리기...
-    else:
-        only_obstacle_df = split_lidar_df
-
-    if len(only_obstacle_df) == 0:
-        # print("감지되는 장애물 없음")
-        # continue  #  ..?
-        return jsonify({"status": "no obstacles detected"})  # 끝내기.
-    else:
-        map_obstacle(only_obstacle_df)
+            # maze
+        info_func_implement+=1
+        if info_func_implement == 3:
+            # data = request.get_json(force=True)  # 현위치 데이터로 받아오기
+            pos = data.get('playerPos', {})
+            pos_x = int(pos.get('x', 0))
+            pos_z = int(pos.get('z', 0))
+            current_pos = (pos_x, pos_z)
     
-    #여기서부터 수정 끝##############
+            if 'x' not in pos or 'z' not in pos:
+                print("현재 위치 좌표를 못 받아옴.")
+            else: 
+                maze, original_obstacles = initialize_maze(current_pos, maze)
+                # print("maze 초기화")
+                # np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
+            how_many_init+=1
+            info_func_implement = 0
+    
+    
+        # 여기서부터 수정 코드
+        # 설정... 
+        # channel 45, MinimapChannel -, Y position 1.61, lidar position: Turret, sdl -, distance 110
+        lidar_data = [
+            (pt["position"]["x"], pt["position"]["z"], pt["verticalAngle"])
+            for pt in data.get("lidarPoints", [])
+            if (
+                2 < pt.get("verticalAngle", 0) < 7 and
+               # pt.get("verticalAngle") != 2.045455 and
+                pt.get("isDetected", False) == True
+            )]
+        
+        if not lidar_data:
+            print("라이다 감지되는 것 없음")
+            return jsonify({"status": "no lidar points"})
+    
+        # 라이다 데이터 -> df로 변환...
+        lidar_df = pd.DataFrame(lidar_data, columns=['x', 'z', 'verticalAngle']) 
+        split_lidar_df = split_by_distance(lidar_df)  # line_group 이라는 칼럼이 추가된 형태가 됨
+    
+        hill_groups = detect_obstacle_and_hill(split_lidar_df)  # 언덕으로 분류된 line_group 값을 알아옴
+        if hill_groups:  # 언덕으로 분류된게 있으면
+            only_obstacle_df = split_lidar_df[~split_lidar_df['line_group'].isin(hill_groups)]  # 언덕으로 분류된 것 죄다 버리기...
+        else:
+            only_obstacle_df = split_lidar_df
+    
+        if len(only_obstacle_df) == 0:
+            # print("감지되는 장애물 없음")
+            # continue  #  ..?
+            return jsonify({"status": "no obstacles detected"})  # 끝내기.
+        else:
+            map_obstacle(only_obstacle_df)
+        
+        #여기서부터 수정 끝##############
+    
+        try:
+            json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
+            with open(json_path, "w") as f:
+                json.dump(original_obstacles, f, indent=2)
+            # print("✅ original_obstacles.json 저장 완료")
+    
+            np.save("maze.npy", np.array(maze))
+            np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
+        except Exception as e:
+            print(f"❌ 장애물 저장 실패: {e}")
 
-    try:
-        json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
-        with open(json_path, "w") as f:
-            json.dump(original_obstacles, f, indent=2)
-        # print("✅ original_obstacles.json 저장 완료")
-
-        np.save("maze.npy", np.array(maze))
-        np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
-    except Exception as e:
-        print(f"❌ 장애물 저장 실패: {e}")
-
-    return jsonify({"status": "success", "obstacle_clusters": ""})
+        three_moved = False
+        print("three_moved = false, info에서")
+        return jsonify({"status": "success", "obstacle_clusters": ""})
+    else:
+        return jsonify({"status": "success", "obstacle_clusters": ""})
     
 
 # A* 알고리즘 관련 클래스 및 함수 정의
@@ -482,6 +491,7 @@ def calculate_actual_path():
 
 tank_detected = False
 tank_detect_time = None
+three_moved = False
 
 combined_command_cache = []
 
@@ -491,6 +501,7 @@ def get_action():
     global start_time, end_time
     global tank_detected, tank_detect_time
     global combined_command_cache
+    global three_moved
     
     data = request.get_json(force=True)
     pos = data.get('position', {})
@@ -547,15 +558,17 @@ def get_action():
         return jsonify(cmd)
     elif not combined_command_cache: #or combined_command_cache is None:  # 비어있다면 = 명령어 두개 다 실행했다면, 이동 
         # print("combined_command_cache 비어있어서 a_star 실행해요...")
-        path = a_star(current_grid, destination)  
+        path = a_star(current_grid, destination) 
+        three_moved = True
+        print("three_moved = true, get action에서")
         # a_star 경로 CSV로 저장
-        if path:
-            df = pd.DataFrame(path, columns=["x", "z"])
-            os.makedirs("logs", exist_ok=True)  # logs 디렉토리 없으면 생성
-            df.to_csv("logs/a_star_path_log.csv", index=False)
-            # print("✅ A* 경로가 logs/a_star_path_log.csv 에 저장되었습니다.")
-        else:
-            print("❌ A* 경로가 비어 있어 저장하지 않았습니다.")
+        # if path:
+        #     df = pd.DataFrame(path, columns=["x", "z"])
+        #     os.makedirs("logs", exist_ok=True)  # logs 디렉토리 없으면 생성
+        #     df.to_csv("logs/a_star_path_log.csv", index=False)
+        #     # print("✅ A* 경로가 logs/a_star_path_log.csv 에 저장되었습니다.")
+        # else:
+        #     print("❌ A* 경로가 비어 있어 저장하지 않았습니다.")
     
     if len(path) > 3:   # 최종목적지까지 3개 이상의 좌표가 남았으면 
         next_grid = path[1:4]  # 3개 좌표 참조
@@ -746,7 +759,7 @@ def collision():
 # 서버 실행
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=4000)
+        app.run(host='0.0.0.0', port=7007)
     except KeyboardInterrupt:
         print("\n🛑 서버 종료 감지됨 (Ctrl+C)")
     finally:
