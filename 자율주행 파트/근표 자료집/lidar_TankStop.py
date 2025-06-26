@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import json
 import time  # 추가0605
 import numpy as np
-
+12345
 # Flask 앱 초기화 및 YOLO 모델 로드
 app = Flask(__name__)
 model = YOLO('yolov8best.pt')
