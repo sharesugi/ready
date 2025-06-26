@@ -323,7 +323,7 @@ def get_action():
         if combined_command_cache:
         # 캐시에 남은 명령이 있으면 그걸 먼저 보내고 pop
             cmd = combined_command_cache.pop(0)
-            #print(f"🚀 cmd 1개 {cmd}")
+            print(f"🚀 cmd 1개 {cmd}")
             return jsonify(cmd)
         elif not combined_command_cache:  # 명령어 두 개 다 실행해서 비어있으면
             path = a_star(current_grid, destination)  # 이 때만 astar 실행
@@ -405,8 +405,8 @@ def get_action():
             combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
 
         #print문 살짝 수정-희연
-        #print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})") # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
-        #print(f"🚀 cmd 3개 {combined_command_cache}")
+        print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})") # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
+        print(f"🚀 cmd 3개 {combined_command_cache}")
         cmd = combined_command_cache.pop(0)
         return jsonify(cmd)
 
@@ -671,7 +671,7 @@ def get_info():
             else: 
                 maze, original_obstacles = initialize_maze(current_pos, maze)
                 print("maze 초기화")
-                np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
+                # np.save(f'./maze_backup/maze_backup{how_many_init}.npy', np.array(maze))
                 how_many_init += 1
                 info_func_implement = 0
     
@@ -707,7 +707,7 @@ def get_info():
             json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
             with open(json_path, "w") as f:
                 json.dump(original_obstacles, f, indent=2)
-            print("✅ original_obstacles.json 저장 완료")
+            # print("✅ original_obstacles.json 저장 완료")
     
             np.save("maze.npy", np.array(maze))
             np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
