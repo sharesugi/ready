@@ -250,69 +250,9 @@ body {
             console.error("목적지 불러오기 실패:", err);
     }
 }
-
-    async function fetchAimStatus() {
-        try {
-            const response = await fetch('/get_action', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({aim_ready: true})
-            });
-            const data = await response.json();
-
-            if (data.aim_ready) {
-                if (data.fire) {
-                    countdownOverlay.style.display = "block";
-                    countdownOverlay.textContent = "🔥 발사!";
-                    lastCountdown = null;
-                    detectionText.textContent = "발사 완료";
-                } else {
-                    if (lastCountdown !== data.remaining) {
-                        countdownOverlay.style.display = "block";
-                        countdownOverlay.textContent = data.remaining;
-                        countdownOverlay.classList.add('countdown-number');
-                        setTimeout(() => {
-                            countdownOverlay.classList.remove('countdown-number');
-                        }, 1000);
-                        lastCountdown = data.remaining;
-                        detectionText.textContent = "조준 중...";
-                    }
-                }
-            } else {
-                countdownOverlay.style.display = "none";
-                detectionText.textContent = "탐지 대기중...";
-                lastCountdown = null;
-            }
-        } catch (err) {
-            console.error("서버 통신 에러:", err);
-        }
-    }
-
-    function delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    function startSpinning() {
-        detectionIcon.style.animation = "spin 2s linear infinite";
-        detectionText.innerText = "탐지 대기중...";
-        detectionStatus.style.display = "flex";
-        statusText.style.display = "none";
-    }
-
-    function stopSpinning() {
-        detectionIcon.style.animation = "none";
-        detectionText.innerText = "도착!";
-    }
-
-    // ✅ 예: 첫 목적지를 전송하고 시뮬레이션 시작
-    // 아래 부분은 상황에 맞게 변경 가능
-    // sendDestinations(10, 20, 30, 40, 50, 60);
-
-    // 계속 Aim 상태 체크
-    setInterval(fetchAimStatus, POLL_INTERVAL);
     window.onload = () => {
         console.log("페이지 로드됨, 목적지 불러오기 시작");
-        setInterval(loadDestinations, 500);
+        setInterval(loadDestinations, 1000);
 };
 </script>
 </body>
