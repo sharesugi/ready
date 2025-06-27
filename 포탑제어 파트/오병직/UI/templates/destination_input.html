@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8" />
+<meta charset="UTF-8" />
     <title>목적지 좌표 입력 (3개)</title>
     <style>
         body {
@@ -10,7 +10,6 @@
             background-color: #f7f7f7;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-
         /* 배경 이미지 + 흐림 효과 */
         #bg {
             position: fixed;
@@ -21,7 +20,6 @@
             filter: blur(2px);
             z-index: -1;
         }
-
         .container {
             display: flex;
             justify-content: center;
@@ -31,40 +29,36 @@
             position: relative;
             z-index: 1;
         }
-
         .form-box {
             background-color: rgba(255, 255, 255, 0.95);
-        padding: 20px 30px;
+            padding: 20px 30px;
             margin-top: 10px;
 
-    /* 테두리 스타일 */
+            /* 테두리 스타일 */
             border-radius: 12px;
             border: 1px solid #dddddd;
 
-    /* 그림자 스타일 */
+            /* 그림자 스타일 */
             box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.12);
 
-    /* 정렬 스타일 */
+            /* 정렬 스타일 */
             text-align: center;
 
-    /* 크기 스타일 */
+            /* 크기 스타일 */
             width: 300px;
 
-    /* hover 시 강조 */
+            /* hover 시 강조 */
             transition: all 0.3s ease;
-}
-
-.form-box:hover {
-    box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.18);
-    border-color: #bbb;
-}
-
+        }       
+        .form-box:hover {
+            box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.18);
+            border-color: #bbb;
+        }
         h2 {
             margin-bottom: 25px;
             color: #333333;
             font-size: 22px;
         }
-
         label {
             display: block;
             margin-top: 15px;
@@ -73,7 +67,6 @@
             font-weight: bold;
             text-align: left;
         }
-
         input[type="number"] {
             width: 100%;
             padding: 10px;
@@ -82,7 +75,6 @@
             font-size: 16px;
             box-sizing: border-box;
         }
-
         button {
             margin-top: 30px;
             padding: 12px 40px;
@@ -99,7 +91,6 @@
             width: fit-content;
             min-width: 150px;
         }
-
         button:hover {
             background-color: #c62828;
         }
@@ -116,30 +107,30 @@
             <div class="form-box">
                 <h2>임무 좌표 1 입력</h2>
                 <label for="destination_x1">X 좌표(기본값 0):</label>
-                <input type="number" name="destination_x1" id="destination_x1" value="50" required>
+                <input type="number" name="destination_x1" id="destination_x1" value="262" required>
 
                 <label for="destination_z1">Z 좌표(기본값 0):</label>
-                <input type="number" name="destination_z1" id="destination_z1" value="50" required>
+                <input type="number" name="destination_z1" id="destination_z1" value="92" required>
             </div>
 
             <!-- 두 번째 목적지 -->
             <div class="form-box">
                 <h2>임무 좌표 2 입력</h2>
                 <label for="destination_x2">X 좌표(기본값 0):</label>
-                <input type="number" name="destination_x2" id="destination_x2" value="100" required>
+                <input type="number" name="destination_x2" id="destination_x2" value="227" required>
 
                 <label for="destination_z2">Z 좌표(기본값 0):</label>
-                <input type="number" name="destination_z2" id="destination_z2" value="100" required>
+                <input type="number" name="destination_z2" id="destination_z2" value="235" required>
             </div>
 
             <!-- 세 번째 목적지 -->
             <div class="form-box">
                 <h2>임무 좌표 3 입력</h2>
                 <label for="destination_x3">X 좌표(기본값 0):</label>
-                <input type="number" name="destination_x3" id="destination_x3" value="200" required>
+                <input type="number" name="destination_x3" id="destination_x3" value="162" required>
 
                 <label for="destination_z3">Z 좌표(기본값 0):</label>
-                <input type="number" name="destination_z3" id="destination_z3" value="200" required>
+                <input type="number" name="destination_z3" id="destination_z3" value="276" required>
             </div>
         </div>
 

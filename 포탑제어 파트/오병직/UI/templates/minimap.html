@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>📍 실시간 A* 경로</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        /* 전체 컨테이너를 중앙 정렬 */
+        #map-container {
+            position: relative;
+            width: 600px;
+            margin-top: 20px;
+        }
+        
+        #map-bg {
+            width: 600px;
+            height: 600px;
+            display: block;
+        }
+        
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 600px;
+            height: 600px;
+            pointer-events: none;
+        }
+        
+        /* 범례를 이미지 정중앙 밑에 배치 */
+        #legend {
+            margin-top: 3px;
+            background: rgba(255,255,255,0.8);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: left;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .box {
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+        }
+    </style>
+</head>
+<body>
+    <!-- ✅ 이미지+캔버스를 감싸는 컨테이너 -->
+    <div id="map-container">
+        <img src="/static/images/minimap.png" id="map-bg">
+        <canvas id="overlay-canvas" width="600" height="600"></canvas>
+
+        <!-- ✅ 이미지 아래에 범례 배치 -->
+        <div id="legend">
+            <div class="legend-item"><div class="box" style="background: blue;"></div>Current A* Path</div>
+            <div class="legend-item"><div class="box" style="background: green;"></div>Current Position</div>
+            <div class="legend-item"><div class="box" style="background: red;"></div>Destination</div>
+            <div class="legend-item" id="distance">remaining distance...</div>
+        </div>
+    </div>
+
+    <script>
+        setInterval(fetchAndDraw, 1000);
+
+        function fetchAndDraw() {
+            fetch('/a_star_path_data')
+                .then(res => res.json())
+                .then(data => drawPath(data));
+        }
+
+        function drawPath(data) {
+            const canvas = document.getElementById('overlay-canvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 2;
+
+            const scale = canvas.width / 300;
+
+            if (!data.path || data.path.length < 2) return;
+
+            let totalDist = 0;
+
+            // Path
+            ctx.beginPath();
+            for (let i = 0; i < data.path.length; i++) {
+                const {x, z} = data.path[i];
+                const px = x * scale;
+                const pz = (300 - z) * scale;
+                if (i === 0) {
+                    ctx.moveTo(px, pz);
+                } else {
+                    ctx.lineTo(px, pz);
+                    const dx = data.path[i].x - data.path[i - 1].x;
+                    const dz = data.path[i].z - data.path[i - 1].z;
+                    totalDist += Math.sqrt(dx * dx + dz * dz);
+                }
+            }
+            ctx.stroke();
+
+            // Current Position
+            const start = data.path[0];
+            ctx.fillStyle = 'green';
+            ctx.fillRect(start.x * scale - 4, (300 - start.z) * scale - 4, 8, 8);
+
+            // Destination
+            const end = data.path[data.path.length - 1];
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(end.x * scale, (300 - end.z) * scale, 6, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // Update distance text
+            document.getElementById("distance").textContent = `remaining distance : ${totalDist.toFixed(2)}`;
+        }
+    </script>
+</body>
+</html>
