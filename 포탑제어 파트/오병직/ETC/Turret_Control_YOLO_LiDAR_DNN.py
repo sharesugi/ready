@@ -22,10 +22,10 @@ FOV_HORIZONTAL = 47.81061
 FOV_VERTICAL = 28         
 
 # 터렛 각도 예측 모델 및 전처리기기 파일 경로
-MODEL_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/best_dnn_model.h5"
-XGB_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/best_xgb_model.pkl"
-SCALER_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/scaler.pkl"
-POLY_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/turret_final/poly_transformer.pkl"
+MODEL_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/ETC/turret_final/best_dnn_model.h5"
+XGB_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/ETC/turret_final/best_xgb_model.pkl"
+SCALER_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/ETC/turret_final/scaler.pkl"
+POLY_PATH = "/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/ETC/turret_final/poly_transformer.pkl"
 
 # 모델 및 전처리기 불러오기
 model = load_model(MODEL_PATH)
@@ -34,7 +34,7 @@ scaler = joblib.load(SCALER_PATH)
 poly = joblib.load(POLY_PATH)
 
 app = Flask(__name__)
-model_yolo = YOLO('/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/best_8s.pt')
+model_yolo = YOLO('/root/jupyter_home/tank_project/ready/포탑제어 파트/오병직/main/models/best_8s.pt')
 
 # 적 전차를 찾는 상태
 FIND_MODE = True

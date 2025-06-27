@@ -1,14 +1,16 @@
 import os, json, time, math
 from ultralytics import YOLO
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template
 import pandas as pd
 import numpy as np
 from queue import PriorityQueue
-from flask import Flask, render_template, request, jsonify
 import fire, drive
 import matplotlib # 이것 추가함
 matplotlib.use('Agg')  # GUI 없는 서버에서도 작동하게 함 # 이것 추가함
 import matplotlib.pyplot as plt # 이것 추가함
+import matplotlib.image as mpimg
+from matplotlib.lines import Line2D
+import io
 
 app = Flask(__name__)
 model_yolo = YOLO('./models/best_8s.pt')
@@ -30,8 +32,8 @@ GRID_SIZE = 300  # 맵 크기
 maze = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]  # 장애물 맵
 
 # 내 전차 시작 위치
-start_x = 20
-start_z = 20
+start_x = 5
+start_z = 75
 start = (start_x, start_z)
 
 # 최종 목적지 위치 - 적 전차도 이 위치에 갖다 놓음.
@@ -258,14 +260,7 @@ len_angle_hist = -1
 
 # 여기 리스트에 cmd 2개를 넣는다
 combined_command_cache = []
-next_group = 1
 three_moved = False  # 0626 추가 (lidar data를 astar 실행했을 때만 받아오게)
-new_df = pd.DataFrame()
-
-aim_ready_since = None
-aim_lost_time = None
-last_logged_second = None
-fired_logged = False
 
 @app.route('/get_action', methods=['POST'])
 def get_action():
@@ -404,6 +399,11 @@ def get_action():
 
             combined_command_cache.append(cmd)   # 두 좌표에 대한 명령값 2개가 여기 리스트에 저장됨
 
+        # A* path 실시간 시각화
+        path = a_star((int(pos_x), int(pos_z)), destination)
+        df = pd.DataFrame(path, columns=["x", "z"])
+        df.to_csv("a_star_path.csv", index=False)  # 매번 최신 경로만 저장
+
         #print문 살짝 수정-희연
         print(f"📍 현재 pos=({pos_x:.1f},{pos_z:.1f})") # yaw={current_yaw:.1f} 두번째 좌표로 가는 앵글 ={target_angle:.1f} 차이 ={diff:.1f}")
         print(f"🚀 cmd 3개 {combined_command_cache}")
@@ -497,50 +497,7 @@ def get_action():
 
         # 조준 완료 판단 (yaw, pitch 오차가 1도 이내일 때)
         aim_ready = bool(abs(yaw_diff) <= 0.1 and abs(pitch_diff) <= 0.1)
-
-        import time
-        global aim_ready_since, aim_lost_time, last_logged_second, fired_logged
-        
-        now = time.time()
-
-        if aim_ready:
-            if aim_ready_since is None:
-                aim_ready_since = now
-                # print("🎯 목표물 포착됨! 조준 시작")
-                fired_logged = False
-                last_logged_second = None
-            aim_lost_time = None
-        else:
-            if aim_ready_since is not None:
-                if aim_lost_time is None:
-                    aim_lost_time = now
-                elif now - aim_lost_time > 1.0:
-                    aim_ready_since = None
-                    aim_lost_time = None
-                    last_logged_second = None
-                    fired_logged = False
-
-        fire_cmd = False
-        if aim_ready_since is not None:
-            elapsed = now - aim_ready_since
-            remaining = 3 - int(elapsed)
-            if elapsed >= 3.0:
-                fire_cmd = True
-                if not fired_logged:
-                    print("🔥 조준 완료 → 3초 경과 → 발사!")
-                    fired_logged = True
-            else:
-                if last_logged_second != remaining:
-                    print(f"🕔 조준 완료! 발사까지 {remaining}초...")
-                    if remaining == 3:
-                        print(f'🏹target_yaw : {target_yaw}, 🏹target_pitch : {target_pitch}')
-                    last_logged_second = remaining
-
-        else:
-            aim_ready_since = None
-            text_shown = False
-            fire_cmd = False
-        #print(f'🏹target_yaw : {target_yaw}, 🏹target_pitch : {target_pitch}')
+        print(f'🏹target_yaw : {target_yaw}, 🏹target_pitch : {target_pitch}')
 
         # 이동은 일단 멈춤, 위에서 계산한 각도 오차에 따른 가중치로 조준
         command = {
@@ -548,15 +505,10 @@ def get_action():
             "moveAD": {"command": "", "weight": 0.0},
             "turretQE": {"command": turretQE_cmd, "weight": yaw_weight if turretQE_cmd else 0.0},
             "turretRF": {"command": turretRF_cmd, "weight": pitch_weight if turretRF_cmd else 0.0},
-            "fire": fire_cmd
+            "fire": aim_ready
         }
-    return jsonify({
-        "target_reached": target_reached, 
-        "remaining": remaining if remaining and remaining > 0 else 0,
-        "fire": fire_cmd,})
+    return jsonify(command)
     
-    
-
 # 전역 상태 저장 (시뮬레이터 reset 시킬 때 사용)
 last_bullet_info = {}
 
@@ -585,10 +537,8 @@ def clamp_range(center, delta = 25, grid_size = 300):  # delta가 buffer 같은 
     end = min(center + delta, grid_size - 1)
     return start, end
 
-
 # 맵, 지나온 길만 초기화하고 현 위치는 초기화 X
 def initialize_maze(current_pos, maze):
-
     maintain_start_x, maintain_end_x = clamp_range(current_pos[0]) #, MAINTAIN_NUM, GRID_SIZE)
     maintain_start_z, maintain_end_z = clamp_range(current_pos[1]) #, MAINTAIN_NUM, GRID_SIZE)
     # 함수 검증용 print문
@@ -698,8 +648,6 @@ def get_info():
     
         if len(only_obstacle_df) == 0:
             print("감지되는 장애물 없음")
-            # continue  #  ..?
-            # return jsonify({"status": "no obstacles detected"})  # 끝내기.
         else:
             map_obstacle(original_obstacles, only_obstacle_df)
     
@@ -707,16 +655,14 @@ def get_info():
             json_path = os.path.join(os.path.dirname(__file__), "original_obstacles.json")
             with open(json_path, "w") as f:
                 json.dump(original_obstacles, f, indent=2)
-            # print("✅ original_obstacles.json 저장 완료")
     
             np.save("maze.npy", np.array(maze))
             np.savetxt("maze.csv", np.array(maze), fmt="%d", delimiter=",")
         except Exception as e:
             print(f"❌ 장애물 저장 실패: {e}")
 
-        three_moved = False # 0626
-        # print("three_moved = false, info에서")  # 0626  디버깅용_(잘 되는거 확인하면 나중에 지워도 상관 무)
-    
+        three_moved = False
+
         # 발사된 탄이 어딘가에 떨어졌을 때
     if last_bullet_info:
             DRIVE_MODE = True
@@ -730,7 +676,6 @@ def get_info():
         "control": control,
     })
 
-# w
 @app.route('/set_destinations', methods=['GET', 'POST'])
 def set_destinations():
     global dest_list, dest_idx
@@ -756,11 +701,11 @@ def set_destinations():
             return jsonify({"status": "success", "destinations": dest_list})
         
         # 폼 전송이면 HTML 반환
-        return render_template('success.html', destinations=dest_list, status='success')
+        return render_template('show_destination.html', destinations=dest_list, status='success')
 
     # GET 요청은 HTML 반환
-    return render_template('success.html', destinations=dest_list, status='ready')
-# w
+    return render_template('show_destination.html', destinations=dest_list, status='ready')
+
 @app.route('/get_destinations')
 def get_destinations():
     global dest_list, dest_idx
@@ -771,39 +716,79 @@ def get_destinations():
                  'over' : int(len(dest_list) <= dest_idx)}
     return jsonify({'destinations': curr_dest})
 
-IMAGE_FOLDER = r'/home/eva/jupyter_home/Tank Challenge/Eend/real_get/capture_images'
-
-
+# A* path 실시간 시각화
+@app.route('/a_star_path_data')
+def get_a_star_path_data():
+    try:
+        df = pd.read_csv("a_star_path.csv")
+        path = df[["x", "z"]].to_dict(orient="records")
+        return jsonify({"path": path})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+# A* path 실시간 시각화
 @app.route('/paths/image', methods=['GET'])
 def get_path_image():
     try:
         df = pd.read_csv("a_star_path.csv")
-
-        fig, ax = plt.subplots(figsize=(6, 5), dpi=100)  # 600x500 크기 맞춤
-        x_vals = df["x"].values
-        z_vals = df["z"].values
-
-        ax.plot(x_vals, z_vals, color='blue', linewidth=2, label="Current A* Path")
-        ax.scatter([x_vals[0]], [z_vals[0]], c='green', s=100, marker='s', label="Start")
-        ax.scatter([x_vals[-1]], [z_vals[-1]], c='red', s=100, marker='*', label="Destination")
-
-        ax.set_xlim(0, 299)
-        ax.set_ylim(0, 299)
-        ax.set_title("Latest A* Path")
-        ax.legend()
-        ax.grid(True)
-        ax.set_aspect('equal')
-        plt.tight_layout()
-
-        img_buf = io.BytesIO()
-        plt.savefig(img_buf, format='png')
-        img_buf.seek(0)
-        plt.close(fig)
-
-        return send_file(img_buf, mimetype='image/png')
     except Exception as e:
-        return f"❌ 시각화 에러: {e}", 500
+        return f"❌ a_star_path.csv 로드 실패: {e}", 500
 
+    # 배경 이미지 로드
+    try:
+        background = mpimg.imread("/static/images/minimap.png")
+    except FileNotFoundError:
+        return "❌ minimap.png 파일을 찾을 수 없습니다.", 500
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    # ✅ 배경 이미지 그리기
+    ax.imshow(background, extent=[0, 299, 0, 299], origin='upper')  # 좌표 (0,0) ~ (299,299)에 매핑
+
+    # ✅ A* 경로 그리기
+    x_vals = df["x"].values
+    z_vals = df["z"].values
+
+    ax.plot(x_vals, z_vals, color='blue', linewidth=2, label="Current A* Path")
+    ax.scatter([x_vals[0]], [z_vals[0]], c='green', s=100, marker='s', label="Start")
+    ax.scatter([x_vals[-1]], [z_vals[-1]], c='red', s=100, marker='*', label="Destination")
+
+    # ✅ 경로 거리 계산 (2D 거리 누적)
+    total_distance = sum(
+        ((x_vals[i+1] - x_vals[i])**2 + (z_vals[i+1] - z_vals[i])**2)**0.5
+        for i in range(len(x_vals) - 1)
+    )
+
+    # ✅ 범례 설정
+    legend_elements = [
+        Line2D([0], [0], color='blue', lw=2, label='Current A* Path'),
+        Line2D([0], [0], marker='s', color='green', label='Current Position', markersize=10, linestyle=''),
+        Line2D([0], [0], marker='*', color='red', label='Destination', markersize=10, linestyle=''),
+        Line2D([], [], color='none', label=f"remaining distance : {total_distance:.2f}")
+    ]
+    ax.legend(handles=legend_elements, loc='upper right')
+    
+    # 전체 맵 기준 축 고정
+    ax.set_xlim(0, 299)
+    ax.set_ylim(0, 299)
+
+    ax.set_title("Latest A* Path on Map Image")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Z")
+    ax.grid(True)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+
+    img_buf = io.BytesIO()
+    plt.savefig(img_buf, format='png')
+    img_buf.seek(0)
+    plt.close(fig)
+
+    return send_file(img_buf, mimetype='image/png')
+
+@app.route('/a_star_path_real_time', methods=['GET'])
+def real_time_map():
+    return render_template('minimap.html')
 
 @app.route('/update_obstacle', methods=['POST'])
 def update_obstacle():
@@ -881,4 +866,4 @@ def start():
     return render_template('destination_input.html')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5004, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
